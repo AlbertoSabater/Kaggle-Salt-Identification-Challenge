@@ -13,6 +13,8 @@ import pandas as pd
 import os
 import json
 import datetime
+import platform
+import pickle
 #from tqdm import tqdm
 
 from keras.callbacks import EarlyStopping, ModelCheckpoint, TensorBoard, CSVLogger
@@ -20,9 +22,9 @@ from sklearn.model_selection import train_test_split
 
 
 # TODO: update automatically with model_params and scores in description
-# TODO: if validation_data==0 -> validate with training set (no augmentation)
 # TODO: tune base_score
 
+TENSORBOARD_DIR = './logs/'
 
 
 
@@ -33,15 +35,18 @@ model_params = {
 					'horizontal_flip': True, 
 					'vertical_flip': True,
 				},
-			'validation_split': 0.2,
+			'validation_split': 0.0,
 			'batch_size': 32,
 			'epochs': 250,
 			'loss': 'binary_crossentropy',
 			'optimizer': 'adam',
 			'metrics': ["accuracy"],
 			'monitor': 'val_acc',
-			'model_architecture_file': 'model_architecture'
+			'model_architecture_file': 'model_architecture',
+			'base_score': 0.5
 		}
+
+if not os.path.exists(TENSORBOARD_DIR): os.makedirs(TENSORBOARD_DIR)
 
 
 # %%
@@ -51,12 +56,19 @@ model_params = {
 # =============================================================================
 
 # Load images
-train_images, _ = nn_utils.load_folder_images("./data/train/images/", model_params['target_size'])
-train_masks, _ = nn_utils.load_folder_images("./data/train/masks/", model_params['target_size'])
+full_train_images, full_train_image_names = nn_utils.load_folder_images("./data/train/images/", model_params['target_size'])
+full_train_masks, _ = nn_utils.load_folder_images("./data/train/masks/", model_params['target_size'])
 
 # Create train and validation dataset
-train_images, val_images, train_masks, val_masks= train_test_split(
-		train_images, train_masks, test_size=model_params['validation_split'], random_state=123)
+if model_params['validation_split'] > 0:
+	train_images, val_images, train_masks, val_masks= train_test_split(
+			full_train_images, full_train_masks, test_size=model_params['validation_split'], random_state=123)
+else:
+	train_images = val_images = full_train_images.copy()
+	train_masks = val_masks = full_train_masks.copy()
+
+model_params['num_train'] = len(train_images)
+model_params['num_val'] = len(val_images)
 
 # Augmented train dataset
 #train_generator, num_samples_train = get_train_generator(batch_size, target_size)
@@ -73,6 +85,7 @@ model_params['num_samples_train'] = num_samples_train
 # =============================================================================
 
 model_params['model_folder'] = nn_utils.create_new_model_folder()
+if not os.path.exists(model_params['model_folder']): os.makedirs(model_params['model_folder'])
 model_params['model_weights_file']= 'model_weights'
 
 print(model_params['model_folder'])
@@ -91,7 +104,7 @@ callbacks = [
 				   
 			EarlyStopping(monitor=model_params['monitor'], min_delta=0.00001, verbose=1, mode='auto', patience=4),
 			
-			TensorBoard(log_dir='logs/{}'.format(model_params['model_folder'].split('/')[-2]), 
+			TensorBoard(log_dir='{}{}'.format(TENSORBOARD_DIR, model_params['model_folder'].split('/')[-2]), 
 						  histogram_freq=0, write_graph=True, 
 						  write_grads=1, batch_size=model_params['batch_size'], write_images=True),
 			   
@@ -105,7 +118,7 @@ hist = model.fit_generator(
 			validation_data = (val_images, val_masks),
 #			validation_steps = num_samples_val // batch_size,
 			callbacks = callbacks,
-			use_multiprocessing = True,
+			use_multiprocessing = False if platform.system() == 'Windows' else True,
 			verbose = 1)
 
 
@@ -130,11 +143,16 @@ model_params['model_folder'] = new_model_folder
 
 # %%
 
+print(' * Calculating and storing train predictions')
+train_preds = nn_utils.get_prediction_result(model, full_train_images, model_params['target_size'], model_params['base_score'])
+pickle.dump((train_preds, full_train_image_names), open(model_params['model_folder']+'preds_train.pckl', 'wb'))
+
+
+# %%
+
 # =============================================================================
 # Predict data
 # =============================================================================
-
-model_params['base_score'] = 0.5
 
 test_dir = './data/test/'
 test_images, test_image_names = nn_utils.load_folder_images(test_dir, model_params['target_size'])
@@ -142,9 +160,9 @@ test_images, test_image_names = nn_utils.load_folder_images(test_dir, model_para
 
 # %%
 
-print(' * Calculating predictions')
+print(' * Calculating and storing test predictions')
 test_preds = nn_utils.get_prediction_result(model, test_images, model_params['target_size'], model_params['base_score'])
-
+pickle.dump((test_preds, test_image_names), open(model_params['model_folder']+'preds_test.pckl', 'wb'))
 
 csv_df = pd.DataFrame.from_dict({'id': [ n.split('.')[0] for n in test_image_names ],
 									'rle_mask': test_preds })
@@ -152,7 +170,12 @@ csv_df = pd.DataFrame.from_dict({'id': [ n.split('.')[0] for n in test_image_nam
 csv_path = model_params['model_folder']+model_params['model_folder'].split('/')[-2]+'.csv'
 csv_df.to_csv(csv_path, index=False)
 
-#os.system('kaggle competitions submit -c tgs-salt-identification-challenge -f {} -m "Second submission test"'.format(csv_path))
+
+print(' * Submitting predictions')
+#comment = '\n'.join([ '{}: {}'.format(k,v) for k,v in model_params.items() ])
+comment = str(model_params)
+os.system('kaggle competitions submit -c tgs-salt-identification-challenge -f {} -m "{}"'.format(csv_path, comment))
+print(' * Predictions submitted')
 
 
 # %%
@@ -161,7 +184,9 @@ csv_df.to_csv(csv_path, index=False)
 # Plot train results
 if False:
 	# %%
-	for i in train_generator:
+#	for i in train_generator:
+	inds = np.random.permutation(range(len(val_images)))
+	for i in zip(val_images[inds].reshape((1,)+val_images.shape), val_masks[inds].reshape((1,)+val_masks.shape)):
 		pred = model.predict(i[0][0,:,:,:].reshape((1,)+model_params['target_size']+(1,)))[0,:,:,0]
 		
 		fig = plt.figure()
