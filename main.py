@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-#from tensorflow.contrib.keras.python.keras.preprocessing.image import ImageDataGenerator
-
 import nn_models
 import nn_utils
 import matplotlib.pyplot as plt
@@ -18,11 +16,12 @@ import pickle
 #from tqdm import tqdm
 
 from keras.callbacks import EarlyStopping, ModelCheckpoint, TensorBoard, CSVLogger
+from keras.models import load_model, model_from_json
 from sklearn.model_selection import train_test_split
 
 
 # TODO: update automatically with model_params and scores in description
-# TODO: tune base_score
+# TODO: add depth after first and/or last CNN layer
 
 TENSORBOARD_DIR = './logs/'
 
@@ -31,6 +30,8 @@ TENSORBOARD_DIR = './logs/'
 model_params = {
 			'datetime': str(datetime.datetime.now()),
 			'target_size': (128,128),
+			'dropout': True,
+			'batchnorm': False,
 			'data_gen_args': {
 					'horizontal_flip': True, 
 					'vertical_flip': True,
@@ -38,10 +39,11 @@ model_params = {
 			'validation_split': 0.0,
 			'batch_size': 32,
 			'epochs': 250,
-			'loss': 'binary_crossentropy',
+			'es_patience': 10,
+			'loss': 'bcedice',
 			'optimizer': 'adam',
 			'metrics': ["accuracy"],
-			'monitor': 'val_acc',
+			'monitor': 'val_loss',
 			'model_architecture_file': 'model_architecture',
 			'base_score': 0.5
 		}
@@ -91,18 +93,30 @@ model_params['model_weights_file']= 'model_weights'
 print(model_params['model_folder'])
 
 
-model = nn_models.unet(model_params['target_size'] + (1,))
+model = nn_models.unet(model_params['target_size'] + (1,),
+					   dropout=model_params['dropout'],
+					   batchnorm=model_params['batchnorm'],)
 print(model.summary())
 
 print(' *  Data generator ready')
 
-model.compile(loss=model_params['loss'], optimizer=model_params['optimizer'], metrics=model_params['metrics'])
+
+nn_loss = 'binary_crossentropy'
+if model_params['loss'] == 'binary_crossentropy':
+	nn_loss = 'binary_crossentropy'
+elif model_params['loss'] == 'dice':
+	nn_loss = nn_models.dice_loss
+elif model_params['loss'] == 'bcedice':
+	nn_loss = nn_models.bce_dice_loss
+	
+model.compile(loss=nn_loss, optimizer=model_params['optimizer'], metrics=model_params['metrics'])
 
 callbacks = [
 			ModelCheckpoint(model_params['model_folder'] + model_params['model_weights_file'] + '.h5', 
 				   monitor=model_params['monitor'], verbose=1, save_best_only=True, mode='auto'),
 				   
-			EarlyStopping(monitor=model_params['monitor'], min_delta=0.00001, verbose=1, mode='auto', patience=4),
+			EarlyStopping(monitor=model_params['monitor'], min_delta=0.00001, 
+				 verbose=1, mode='auto', patience=model_params['es_patience']),
 			
 			TensorBoard(log_dir='{}{}'.format(TENSORBOARD_DIR, model_params['model_folder'].split('/')[-2]), 
 						  histogram_freq=0, write_graph=True, 
@@ -117,6 +131,7 @@ hist = model.fit_generator(
 			epochs = model_params['epochs'],
 			validation_data = (val_images, val_masks),
 #			validation_steps = num_samples_val // batch_size,
+			shuffle = True,
 			callbacks = callbacks,
 			use_multiprocessing = False if platform.system() == 'Windows' else True,
 			verbose = 1)
@@ -135,12 +150,37 @@ with open(model_params['model_folder'] + 'model_params.json', 'w') as f:
 
 # Rename model_folder with monitor and its value, and tensorboard folder
 new_model_folder = model_params['model_folder'][:-1] + \
-				"_{}_{:.4f}/".format(model_params['monitor'], max(hist.history[model_params['monitor']]))
+				"_{}_{:.4f}".format(model_params['monitor'], max(hist.history[model_params['monitor']]))
+new_model_folder = new_model_folder + '_{}_{}/'.format(
+						'd' if model_params['dropout'] else 'nd',
+						'bn' if model_params['dropout'] else 'nbn',
+		)
 os.rename(model_params['model_folder'], new_model_folder)
 os.rename(model_params['model_folder'].replace('./models/', './logs/'), new_model_folder.replace('./models/', './logs/'))
 model_params['model_folder'] = new_model_folder
-	
 
+	
+# %%
+model.load_weights(model_params['model_folder'] + model_params['model_weights_file'] + '.h5')
+
+
+# %%
+
+train_preds = model.predict(full_train_images)
+train_preds = nn_utils.process_image(train_preds, (len(train_preds),)+(101,101))
+
+
+# %%
+
+original_masks, _ = nn_utils.load_folder_images("./data/train/masks/", (101,101))
+												
+
+# %%
+
+best_bs, best_score = nn_models.tune_base_score(train_preds.ravel(), original_masks.ravel().astype(int))
+model_params['base_score'] = best_bs
+
+	
 # %%
 
 print(' * Calculating and storing train predictions')
@@ -157,23 +197,27 @@ pickle.dump((train_preds, full_train_image_names), open(model_params['model_fold
 test_dir = './data/test/'
 test_images, test_image_names = nn_utils.load_folder_images(test_dir, model_params['target_size'])
 
-
-# %%
+	
+# %%	
 
 print(' * Calculating and storing test predictions')
-test_preds = nn_utils.get_prediction_result(model, test_images, model_params['target_size'], model_params['base_score'])
+test_preds = nn_utils.get_prediction_result(model, test_images, 
+							model_params['target_size'], model_params['base_score'])
 pickle.dump((test_preds, test_image_names), open(model_params['model_folder']+'preds_test.pckl', 'wb'))
 
 csv_df = pd.DataFrame.from_dict({'id': [ n.split('.')[0] for n in test_image_names ],
 									'rle_mask': test_preds })
 
-csv_path = model_params['model_folder']+model_params['model_folder'].split('/')[-2]+'.csv'
-csv_df.to_csv(csv_path, index=False)
+csv_path = model_params['model_folder']+model_params['model_folder'].split('/')[-2]+'.csv.gz'
+csv_df.to_csv(csv_path, compression='gzip', index=False)
 
 
+print(' ** Submit prediction?')
+input()
 print(' * Submitting predictions')
 #comment = '\n'.join([ '{}: {}'.format(k,v) for k,v in model_params.items() ])
-comment = str(model_params)
+#comment = str(model_params)
+comment = 'l_{}_vs{}'.format(model_params['loss'], model_params['validation_split'])
 os.system('kaggle competitions submit -c tgs-salt-identification-challenge -f {} -m "{}"'.format(csv_path, comment))
 print(' * Predictions submitted')
 

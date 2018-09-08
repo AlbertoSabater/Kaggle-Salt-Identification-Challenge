@@ -71,7 +71,8 @@ def load_and_process_image(f, folder_path, target_size):
 	return process_image(img, target_size)
 
 def load_folder_images(folder_path, target_size):
-	pickle_file = '{}{}_{}.pckl'.format(BASE_PREPROCESSED_DATA_DIR, folder_path.split('/')[2], folder_path.split('/')[3])
+	pickle_file = '{}{}_{}_{}.pckl'.format(BASE_PREPROCESSED_DATA_DIR, 
+				folder_path.split('/')[2], folder_path.split('/')[3], target_size)
 	if os.path.isfile(pickle_file):
 		print(' * Loading images from pickle: {}'.format(pickle_file))
 		data, image_names = pickle.load(open(pickle_file, 'rb'))
