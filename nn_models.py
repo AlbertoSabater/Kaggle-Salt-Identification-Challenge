@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from keras.layers import Input, Conv2D, MaxPooling2D, Dropout, merge, UpSampling2D, Conv2DTranspose, concatenate
+from keras.layers import Input, Dense, Conv2D, MaxPooling2D, Dropout, merge,\
+							UpSampling2D, Conv2DTranspose, concatenate,\
+							RepeatVector, Reshape
 from keras.layers.normalization import BatchNormalization
 from keras.models import Model
 from keras import backend as K
@@ -33,10 +35,10 @@ def tune_base_score(pred, y):
 					   (0.05/3/3/3, 2, 3)]
 	
 	for params in bs_pipeline:
-		print(params, best_bs-params[0]*params[1], best_bs+params[0]*params[2], params[0])
+#		print(params, best_bs-params[0]*params[1], best_bs+params[0]*params[2], params[0])
 		for bs in np.arange(best_bs-params[0]*params[1], best_bs+params[0]*params[2], params[0]):
 			score = accuracy_score(np.where(pred>bs, 1, 0), y)
-			print(bs, score)
+#			print(bs, score)
 			if score > best_score:
 				best_score = score
 				best_bs = bs
@@ -47,10 +49,17 @@ def tune_base_score(pred, y):
 	return best_bs, best_score
 
 
-def unet(input_size, dropout=True, batchnorm=True):
+def unet(input_size, include_depth=[], dropout=True, batchnorm=True):
 
-	input_img = Input(input_size)
-	
+	input_img = Input(input_size, name='input_image')
+	input_depth = Input((1,), name='input_depth')
+
+	if 0 in include_depth:
+		print(' - Introducing depth 0')
+		depth = RepeatVector(input_size[0]*input_size[1])(input_depth)
+		depth = Reshape((input_size[0], input_size[1], 1))(depth)
+		input_img = concatenate([input_img, depth], 0)
+		
 	conv1 = Conv2D(16, (3, 3), activation='relu', padding='same')(input_img)
 	conv1 = Conv2D(16, (3, 3), activation='relu', padding='same')(conv1)
 	pool1 = MaxPooling2D(pool_size=(2, 2))(conv1)
@@ -74,9 +83,18 @@ def unet(input_size, dropout=True, batchnorm=True):
 	pool4 = MaxPooling2D(pool_size=(2, 2))(conv4)
 	if batchnorm: pool4 = BatchNormalization()(pool4)
 	if dropout: pool4 = Dropout(0.25)(pool4)
+	
+
+	if 1 in include_depth:
+		print(' - Introducing depth 1')
+		depth1 = RepeatVector(64)(input_depth)
+		depth1 = Reshape((8,8, 1))(depth1)
+		pool4 = concatenate([pool4, depth1], -1)
+	
 
 	conv5 = Conv2D(512, (3, 3), activation='relu', padding='same')(pool4)
 	conv5 = Conv2D(512, (3, 3), activation='relu', padding='same')(conv5)
+	
 	
 	up6 = concatenate([Conv2DTranspose(256, (2, 2), strides=(2, 2), padding='same')(conv5), conv4], axis=3)
 	if batchnorm: up6 = BatchNormalization()(up6)
@@ -103,8 +121,13 @@ def unet(input_size, dropout=True, batchnorm=True):
 	conv9 = Conv2D(16, (3, 3), activation='relu', padding='same')(conv9)
 	if batchnorm: conv9 = BatchNormalization()(conv9)
 
-	conv10 = Conv2D(1, (1, 1), activation='sigmoid')(conv9)
+	conv10 = Conv2D(1, (1, 1), activation='sigmoid', name='output')(conv9)
 	
 	#model.summary()
 
-	return Model(input_img, conv10)
+	if len(include_depth) > 0:
+		print(' - Model with depth')
+		return Model(inputs=[input_img, input_depth], outputs=conv10)
+	else:
+		return Model(input_img, conv10)
+	

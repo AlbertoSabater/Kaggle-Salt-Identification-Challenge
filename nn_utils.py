@@ -86,19 +86,49 @@ def load_folder_images(folder_path, target_size):
 		return data, image_names
 
 
-def get_train_generator_on_memory(train_images, train_masks, batch_size, data_gen_args):
+def get_image_generator_on_memory(images, masks, batch_size, data_gen_args):
 	
 	seed = 123
 
-#	data_gen_args = dict()
-	
 	image_datagen = ImageDataGenerator(**data_gen_args)
 	mask_datagen = ImageDataGenerator(**data_gen_args)
 	
-	train_generator = zip(image_datagen.flow(train_images, batch_size=batch_size, shuffle=True, seed=seed), 
-						   mask_datagen.flow(train_masks, batch_size=batch_size, shuffle=True, seed=seed))
+	generator = zip(image_datagen.flow(images, batch_size=batch_size, shuffle=True, seed=seed), 
+						   mask_datagen.flow(masks, batch_size=batch_size, shuffle=True, seed=seed))
 	
-	return train_generator, train_images.shape[0]
+	return generator, images.shape[0]
+
+
+def get_image_depth_generator_on_memory(images, masks, depths, batch_size, data_gen_args):
+	
+	seed = 123
+
+	image_datagen = ImageDataGenerator(**data_gen_args)
+	mask_datagen = ImageDataGenerator(**data_gen_args)
+#	depth_datagen = ImageDataGenerator({})
+	
+	generator = zip(image_datagen.flow(images, batch_size=batch_size, shuffle=True, seed=seed),
+#					   depth_datagen.flow(depths, batch_size=batch_size, shuffle=True, seed=seed), 
+					   mask_datagen.flow(masks, batch_size=batch_size, shuffle=True, seed=seed))
+	
+	return generator, images.shape[0]
+
+
+def get_image_depth_generator_on_memory_v2(images, masks, depths, batch_size, data_gen_args):
+	seed = 123
+	image_datagen = ImageDataGenerator(**data_gen_args)
+	mask_datagen = ImageDataGenerator(**data_gen_args)	
+	
+	image_f = image_datagen.flow(images, depths, batch_size=batch_size, shuffle=True, seed=seed)
+	mask_f = mask_datagen.flow(masks, batch_size=batch_size, shuffle=True, seed=seed)
+	
+	while True:
+		image_n = image_f.next()
+		mask_n = mask_f.next()
+		
+#		yield {'input_image': image_n[0], 'input_depth': image_n[1]}, {'output': mask_n}
+#		yield [image_n[0], image_n[1]], mask_n
+		yield np.concatenate([image_n[0], image_n[1]], axis=0), mask_n
 
 
 # deprecated

@@ -18,6 +18,7 @@ import pickle
 from keras.callbacks import EarlyStopping, ModelCheckpoint, TensorBoard, CSVLogger
 from keras.models import load_model, model_from_json
 from sklearn.model_selection import train_test_split
+from sklearn import preprocessing
 
 
 # TODO: update automatically with model_params and scores in description
@@ -25,22 +26,26 @@ from sklearn.model_selection import train_test_split
 
 TENSORBOARD_DIR = './logs/'
 
+'''
+
+'''
 
 
 model_params = {
 			'datetime': str(datetime.datetime.now()),
 			'target_size': (128,128),
+			'include_depth': [1],
 			'dropout': True,
-			'batchnorm': False,
+			'batchnorm': True,
 			'data_gen_args': {
 					'horizontal_flip': True, 
 					'vertical_flip': True,
 				},
 			'validation_split': 0.0,
-			'batch_size': 32,
+			'batch_size': 64,
 			'epochs': 250,
 			'es_patience': 10,
-			'loss': 'bcedice',
+			'loss': 'bce', 			# bce / dice / bcedice
 			'optimizer': 'adam',
 			'metrics': ["accuracy"],
 			'monitor': 'val_loss',
@@ -49,6 +54,9 @@ model_params = {
 		}
 
 if not os.path.exists(TENSORBOARD_DIR): os.makedirs(TENSORBOARD_DIR)
+
+depths = pd.DataFrame.from_csv('./data/depths.csv')
+depths.z = preprocessing.MinMaxScaler().fit_transform(depths[['z']].values.astype(float))
 
 
 # %%
@@ -74,10 +82,23 @@ model_params['num_val'] = len(val_images)
 
 # Augmented train dataset
 #train_generator, num_samples_train = get_train_generator(batch_size, target_size)
-train_generator, num_samples_train = nn_utils.get_train_generator_on_memory(
-		train_images, train_masks,
-		model_params['batch_size'], model_params['data_gen_args'])
-model_params['num_samples_train'] = num_samples_train
+if len(model_params['include_depth']) > 0:
+	
+	print(' * Including depth')
+	train_depths = depths.loc[[ n[:-4] for n in full_train_image_names ]].values
+#	depths_train = np.concatenate( [ np.resize(d, (1, 128,128,1)) for d in depths_train ])
+#	train_generator, num_samples_train = nn_utils.get_image_depth_generator_on_memory(
+	train_generator = nn_utils.get_image_depth_generator_on_memory_v2(
+			train_images, train_masks, train_depths,
+			model_params['batch_size'], model_params['data_gen_args'])
+	model_params['num_samples_train'] = train_images.shape[0]
+	
+else:
+	print(' * No including depth')
+	train_generator, num_samples_train = nn_utils.get_image_generator_on_memory(
+			train_images, train_masks,
+			model_params['batch_size'], model_params['data_gen_args'])
+	model_params['num_samples_train'] = num_samples_train
 
 
 # %%
@@ -94,6 +115,7 @@ print(model_params['model_folder'])
 
 
 model = nn_models.unet(model_params['target_size'] + (1,),
+					   include_depth = model_params['include_depth'],
 					   dropout=model_params['dropout'],
 					   batchnorm=model_params['batchnorm'],)
 print(model.summary())
@@ -102,7 +124,7 @@ print(' *  Data generator ready')
 
 
 nn_loss = 'binary_crossentropy'
-if model_params['loss'] == 'binary_crossentropy':
+if model_params['loss'] == 'bce':
 	nn_loss = 'binary_crossentropy'
 elif model_params['loss'] == 'dice':
 	nn_loss = nn_models.dice_loss
@@ -127,7 +149,7 @@ callbacks = [
 
 hist = model.fit_generator(
 			generator = train_generator,
-			steps_per_epoch = num_samples_train // model_params['batch_size'], #################### 3072 num_samples_train
+			steps_per_epoch = model_params['num_samples_train'] // model_params['batch_size'], #################### 3072 num_samples_train
 			epochs = model_params['epochs'],
 			validation_data = (val_images, val_masks),
 #			validation_steps = num_samples_val // batch_size,
@@ -135,6 +157,16 @@ hist = model.fit_generator(
 			callbacks = callbacks,
 			use_multiprocessing = False if platform.system() == 'Windows' else True,
 			verbose = 1)
+
+
+# %%
+
+model.fit([train_images, train_depths], train_masks)
+
+# %%
+
+
+# %%
 
 
 # Store model architecture
@@ -151,7 +183,8 @@ with open(model_params['model_folder'] + 'model_params.json', 'w') as f:
 # Rename model_folder with monitor and its value, and tensorboard folder
 new_model_folder = model_params['model_folder'][:-1] + \
 				"_{}_{:.4f}".format(model_params['monitor'], max(hist.history[model_params['monitor']]))
-new_model_folder = new_model_folder + '_{}_{}/'.format(
+new_model_folder = new_model_folder + '_{}_{}_{}/'.format(
+						'id' if model_params['include_depth'] else 'nid',
 						'd' if model_params['dropout'] else 'nd',
 						'bn' if model_params['dropout'] else 'nbn',
 		)
@@ -264,5 +297,11 @@ if False:
 	plt.subplot(133)
 	plt.imshow(np.where(pred > model_params['base_score'], 1, 0))
 	
+
+# %%
+	
+for r in train_generator:
+	pass
+	break
 	
 	
