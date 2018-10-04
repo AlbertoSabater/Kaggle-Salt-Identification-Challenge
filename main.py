@@ -32,6 +32,7 @@ Ubuntu updated to Cuda 9.0
 tensorflow-gpu updated
 multi-input model created. Depths as input concatenated in different layers
 stored model name udpated
+iou base_score tune
 '''
 
 
@@ -47,7 +48,7 @@ model_params = {
 				},
 			'validation_split': 0.0,
 			'batch_size': 64,
-			'epochs': 5,
+			'epochs': 250,
 			'es_patience': 10,
 			'loss': 'bcedice', 			# bce / dice / bcedice
 			'optimizer': 'adam',
