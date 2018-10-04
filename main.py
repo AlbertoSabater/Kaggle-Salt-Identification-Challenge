@@ -23,11 +23,15 @@ from sklearn import preprocessing
 
 # TODO: update automatically with model_params and scores in description
 # TODO: add depth after first and/or last CNN layer
+# TODO: Parallel in tune base_score
 
 TENSORBOARD_DIR = './logs/'
 
 '''
-
+Ubuntu updated to Cuda 9.0
+tensorflow-gpu updated
+multi-input model created. Depths as input concatenated in different layers
+stored model name udpated
 '''
 
 
@@ -43,9 +47,9 @@ model_params = {
 				},
 			'validation_split': 0.0,
 			'batch_size': 64,
-			'epochs': 250,
+			'epochs': 5,
 			'es_patience': 10,
-			'loss': 'bce', 			# bce / dice / bcedice
+			'loss': 'bcedice', 			# bce / dice / bcedice
 			'optimizer': 'adam',
 			'metrics': ["accuracy"],
 			'monitor': 'val_loss',
@@ -67,7 +71,7 @@ depths.z = preprocessing.MinMaxScaler().fit_transform(depths[['z']].values.astyp
 
 # Load images
 full_train_images, full_train_image_names = nn_utils.load_folder_images("./data/train/images/", model_params['target_size'])
-full_train_masks, _ = nn_utils.load_folder_images("./data/train/masks/", model_params['target_size'])
+full_train_masks, full_test_image_names = nn_utils.load_folder_images("./data/train/masks/", model_params['target_size'])
 
 # Create train and validation dataset
 if model_params['validation_split'] > 0:
@@ -86,6 +90,7 @@ if len(model_params['include_depth']) > 0:
 	
 	print(' * Including depth')
 	train_depths = depths.loc[[ n[:-4] for n in full_train_image_names ]].values
+	val_depths = depths.loc[[ n[:-4] for n in full_test_image_names ]].values
 #	depths_train = np.concatenate( [ np.resize(d, (1, 128,128,1)) for d in depths_train ])
 #	train_generator, num_samples_train = nn_utils.get_image_depth_generator_on_memory(
 	train_generator = nn_utils.get_image_depth_generator_on_memory_v2(
@@ -93,12 +98,17 @@ if len(model_params['include_depth']) > 0:
 			model_params['batch_size'], model_params['data_gen_args'])
 	model_params['num_samples_train'] = train_images.shape[0]
 	
+	train_data = [train_images, train_depths]
+	val_data = [val_images, val_depths]
+	
 else:
 	print(' * No including depth')
 	train_generator, num_samples_train = nn_utils.get_image_generator_on_memory(
 			train_images, train_masks,
 			model_params['batch_size'], model_params['data_gen_args'])
 	model_params['num_samples_train'] = num_samples_train
+	train_data = train_images
+	val_data = val_images
 
 
 # %%
@@ -125,7 +135,7 @@ print(' *  Data generator ready')
 
 nn_loss = 'binary_crossentropy'
 if model_params['loss'] == 'bce':
-	nn_loss = 'binary_crossentropy'
+	nn_loss = nn_models.bce
 elif model_params['loss'] == 'dice':
 	nn_loss = nn_models.dice_loss
 elif model_params['loss'] == 'bcedice':
@@ -151,7 +161,7 @@ hist = model.fit_generator(
 			generator = train_generator,
 			steps_per_epoch = model_params['num_samples_train'] // model_params['batch_size'], #################### 3072 num_samples_train
 			epochs = model_params['epochs'],
-			validation_data = (val_images, val_masks),
+			validation_data = (val_data, val_masks),
 #			validation_steps = num_samples_val // batch_size,
 			shuffle = True,
 			callbacks = callbacks,
@@ -161,9 +171,6 @@ hist = model.fit_generator(
 
 # %%
 
-model.fit([train_images, train_depths], train_masks)
-
-# %%
 
 
 # %%
@@ -181,43 +188,58 @@ with open(model_params['model_folder'] + 'model_params.json', 'w') as f:
 
 
 # Rename model_folder with monitor and its value, and tensorboard folder
+val = min(hist.history[model_params['monitor']]) if 'loss' in model_params['monitor'] else max(hist.history[model_params['monitor']])
 new_model_folder = model_params['model_folder'][:-1] + \
-				"_{}_{:.4f}".format(model_params['monitor'], max(hist.history[model_params['monitor']]))
-new_model_folder = new_model_folder + '_{}_{}_{}/'.format(
-						'id' if model_params['include_depth'] else 'nid',
+				"_{}_{:.4f}".format(model_params['monitor'], val)
+new_model_folder = new_model_folder + '_{}_{}_{}_d{}/'.format(
+						model_params['loss'],
 						'd' if model_params['dropout'] else 'nd',
-						'bn' if model_params['dropout'] else 'nbn',
+						'bn' if model_params['batchnorm'] else 'nbn',
+						''.join([ str(v) for v in model_params['include_depth'] ]) if len(model_params['include_depth'])>0 else 'nd'
 		)
 os.rename(model_params['model_folder'], new_model_folder)
 os.rename(model_params['model_folder'].replace('./models/', './logs/'), new_model_folder.replace('./models/', './logs/'))
 model_params['model_folder'] = new_model_folder
 
-	
-# %%
 model.load_weights(model_params['model_folder'] + model_params['model_weights_file'] + '.h5')
 
 
 # %%
 
-train_preds = model.predict(full_train_images)
+train_preds = model.predict(train_data)
 train_preds = nn_utils.process_image(train_preds, (len(train_preds),)+(101,101))
 
 
 # %%
 
 original_masks, _ = nn_utils.load_folder_images("./data/train/masks/", (101,101))
-												
+
 
 # %%
 
+print('Tuning base score')
 best_bs, best_score = nn_models.tune_base_score(train_preds.ravel(), original_masks.ravel().astype(int))
 model_params['base_score'] = best_bs
+
+
+# %%
+
+#import tensorflow as tf
+#
+#mean_precision = nn_models.iou_precision(original_masks, train_preds)
+##sess = tf.Session()
+##iou = sess.run(mean_precision)
+#
+#with tf.Session() as sess:
+#	iou = sess.run(mean_precision)
 
 	
 # %%
 
 print(' * Calculating and storing train predictions')
-train_preds = nn_utils.get_prediction_result(model, full_train_images, model_params['target_size'], model_params['base_score'])
+#train_preds = nn_utils.get_prediction_result(model, val_data, model_params['target_size'], model_params['base_score'])
+train_preds = model.predict(train_data)
+train_preds = [ nn_utils.get_result(tp, model_params['base_score']) for tp in train_preds ]
 pickle.dump((train_preds, full_train_image_names), open(model_params['model_folder']+'preds_train.pckl', 'wb'))
 
 
@@ -228,14 +250,19 @@ pickle.dump((train_preds, full_train_image_names), open(model_params['model_fold
 # =============================================================================
 
 test_dir = './data/test/'
-test_images, test_image_names = nn_utils.load_folder_images(test_dir, model_params['target_size'])
+test_data, test_image_names = nn_utils.load_folder_images(test_dir, model_params['target_size'])
+if len(model_params['include_depth']) > 0:
+	test_data = [test_data, depths.loc[[ n[:-4] for n in test_image_names ]].values]
 
 	
 # %%	
 
 print(' * Calculating and storing test predictions')
-test_preds = nn_utils.get_prediction_result(model, test_images, 
-							model_params['target_size'], model_params['base_score'])
+#test_preds = nn_utils.get_prediction_result(model, test_data, 
+#							model_params['target_size'], model_params['base_score'])
+test_preds = model.predict(test_data)
+test_preds = [ nn_utils.get_result(tp, model_params['base_score']) for tp in test_preds ]
+
 pickle.dump((test_preds, test_image_names), open(model_params['model_folder']+'preds_test.pckl', 'wb'))
 
 csv_df = pd.DataFrame.from_dict({'id': [ n.split('.')[0] for n in test_image_names ],
@@ -250,27 +277,45 @@ input()
 print(' * Submitting predictions')
 #comment = '\n'.join([ '{}: {}'.format(k,v) for k,v in model_params.items() ])
 #comment = str(model_params)
+
 comment = 'l_{}_vs{}'.format(model_params['loss'], model_params['validation_split'])
-os.system('kaggle competitions submit -c tgs-salt-identification-challenge -f {} -m "{}"'.format(csv_path, comment))
-print(' * Predictions submitted')
+command = 'kaggle competitions submit -c tgs-salt-identification-challenge -f {} -m "{}"'.format(csv_path.replace('|', '\|'), comment)
+print(command)
+#os.system(command)
+#print(' * Predictions submitted')
 
 
 # %%
 
+model.load_weights('./models/1004_0915_model_24_val_loss_0.1887_bce_d_bn_d1/model_weights.h5')
+
+
+# %%
 
 # Plot train results
 if False:
-	# %%
-#	for i in train_generator:
-	inds = np.random.permutation(range(len(val_images)))
-	for i in zip(val_images[inds].reshape((1,)+val_images.shape), val_masks[inds].reshape((1,)+val_masks.shape)):
-		pred = model.predict(i[0][0,:,:,:].reshape((1,)+model_params['target_size']+(1,)))[0,:,:,0]
+# %%
+#	inds = np.random.permutation(range(len(val_images)))
+	while True:
+		ind = np.random.choice(list(range(len(val_images))))
+		
+		img = val_images[ind].reshape((1,)+model_params['target_size']+(1,))
+		mask = val_masks[ind].reshape((1,)+model_params['target_size']+(1,))
+
+		if len(model_params['include_depth']) > 0:
+			depth = val_depths[ind]
+			pred = model.predict([img, depth])[0,:,:,0]
+		else:
+			pred = model.predict(img)[0,:,:,0]
+
 		
 		fig = plt.figure()
 		plt.subplot(221)
-		plt.imshow(i[0][0,:,:,0])
+#		plt.imshow(i[0][0,:,:,0])
+		plt.imshow(img[0,:,:,0])
 		plt.subplot(222)
-		plt.imshow(i[1][0,:,:,0])
+#		plt.imshow(i[1][0,:,:,0])
+		plt.imshow(mask[0,:,:,0])
 		plt.subplot(223)
 		plt.imshow(pred)
 		plt.subplot(224)
@@ -284,14 +329,23 @@ if False:
 if False:
 	
 	# %%
-	test_dir = 'data/test/'
-	test_image_names = os.listdir(test_dir)
-	img = nn_utils.load_and_process_image(np.random.choice(test_image_names, 1)[0], test_dir, model_params['target_size'])
-	pred = model.predict(img.reshape((1,)+model_params['target_size']+(1,)))[0,:,:,0]
+#	test_dir = 'data/test/'
+#	test_image_names = os.listdir(test_dir)
+#	img = nn_utils.load_and_process_image(np.random.choice(test_image_names, 1)[0], test_dir, model_params['target_size'])
+	
+#	pred = model.predict(img.reshape((1,)+model_params['target_size']+(1,)))[0,:,:,0]
+	ind = np.random.choice(list(range(len(val_images))))
+	img = test_data[0][ind].reshape((1,)+model_params['target_size']+(1,))
+	
+	if len(model_params['include_depth']) > 0:
+		depth = test_data[1][ind]
+		pred = model.predict([img, depth])[0,:,:,0]
+	else:
+		pred = model.predict(img.reshape((1,)+model_params['target_size']+(1,)))[0,:,:,0]
 	
 	fig = plt.figure()
 	plt.subplot(131)
-	plt.imshow(img[:,:,0])
+	plt.imshow(img[0,:,:,0])
 	plt.subplot(132)
 	plt.imshow(pred)
 	plt.subplot(133)

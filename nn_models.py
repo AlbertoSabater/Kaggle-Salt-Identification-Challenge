@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from keras.layers import Input, Dense, Conv2D, MaxPooling2D, Dropout, merge,\
-							UpSampling2D, Conv2DTranspose, concatenate,\
-							RepeatVector, Reshape
-from keras.layers.normalization import BatchNormalization
+from keras.layers import Input, Conv2D, MaxPooling2D, Dropout,\
+							Conv2DTranspose, concatenate,\
+							RepeatVector, Reshape, BatchNormalization
+#from tensorflow.keras.layers.normalization import BatchNormalization
 from keras.models import Model
 from keras import backend as K
 import numpy as np
@@ -12,24 +12,27 @@ from keras.losses import binary_crossentropy
 from sklearn.metrics import accuracy_score
 
 
+def bce(y_true, y_pred):
+	return binary_crossentropy(y_true, y_pred)
+
 def dice_coef(y_true, y_pred):
-    y_true_f = K.flatten(y_true)
-    y_pred_f = K.flatten(y_pred)
-    intersection = K.sum(y_true_f * y_pred_f)
-    return (2. * intersection + 1.) / (K.sum(y_true_f) + K.sum(y_pred_f) + 1.)
+	y_true_f = K.flatten(y_true)
+	y_pred_f = K.flatten(y_pred)
+	intersection = K.sum(y_true_f * y_pred_f)
+	return (2. * intersection + 1.) / (K.sum(y_true_f) + K.sum(y_pred_f) + 1.)
 
 def dice_loss(y_true, y_pred):
-    loss = 1 - dice_coef(y_true, y_pred)
-    return loss
+	loss = 1 - dice_coef(y_true, y_pred)
+	return loss
 
 def bce_dice_loss(y_true, y_pred):
-    return binary_crossentropy(y_true, y_pred) + dice_loss(y_true, y_pred)
+	return binary_crossentropy(y_true, y_pred) + dice_loss(y_true, y_pred)
 
 
 def tune_base_score(pred, y):
 	best_bs = 0.5
 	best_score = 0
-	bs_pipeline = [(0.05, 8, 9),
+	bs_pipeline = [(0.05, 4, 5),
 					   (0.05/3, 2, 3),
 					   (0.05/3/3, 2, 3),
 					   (0.05/3/3/3, 2, 3)]
@@ -37,14 +40,15 @@ def tune_base_score(pred, y):
 	for params in bs_pipeline:
 #		print(params, best_bs-params[0]*params[1], best_bs+params[0]*params[2], params[0])
 		for bs in np.arange(best_bs-params[0]*params[1], best_bs+params[0]*params[2], params[0]):
-			score = accuracy_score(np.where(pred>bs, 1, 0), y)
+#			score = accuracy_score(np.where(pred>bs, 1, 0), y)
+			score = iou_precision(y, np.where(pred>bs, 1, 0))
 #			print(bs, score)
 			if score > best_score:
 				best_score = score
 				best_bs = bs
-		print('-'*60)
-		print(best_bs, best_score)
-		print('-'*60)
+#		print('-'*60)
+#		print(best_bs, best_score)
+#		print('-'*60)
 		
 	return best_bs, best_score
 
@@ -130,4 +134,61 @@ def unet(input_size, include_depth=[], dropout=True, batchnorm=True):
 		return Model(inputs=[input_img, input_depth], outputs=conv10)
 	else:
 		return Model(input_img, conv10)
+
+
+
+import keras.backend as K
+import tensorflow as tf
+
+# https://www.kaggle.com/dibgerge/another-tf-keras-implementation-of-score-metric
+def iou_precision(y_true, y_pred):
+	"""
+	Computes the mean precision at different iou threshold levels.
+	:param y_true:
+	:param y_pred:
+	:return:
+	"""
+	y_true = tf.to_int32(y_true)
+	y_pred = tf.to_int32(tf.round(y_pred))
+
+	n_batch = tf.shape(y_true)[0]
+
+	y_true = tf.reshape(y_true, shape=[n_batch , -1])
+	y_pred = tf.reshape(y_pred, shape=[n_batch, -1])
+
+	intersection = K.sum(tf.bitwise.bitwise_and(y_true, y_pred), -1)
+	union = K.sum(tf.bitwise.bitwise_or(y_true, y_pred), -1)
+	#iou = tf.where(union == 0, tf.ones(n_batch), tf.to_float(intersection/union))
+	SMOOTH = tf.constant(1e-6)
+	iou = tf.add(tf.to_float(intersection), SMOOTH)/tf.add(tf.to_float(union), SMOOTH)
+
+	precision = tf.zeros(n_batch)
+	thresholds = np.arange(0.5, 1.0, 0.05)
+	for thresh in thresholds:
+		precision = precision + tf.to_float(iou > thresh)
+	precision = precision/len(thresholds)
+
+	mean_precision = K.mean(precision)
+	
+	with tf.Session() as sess:
+		iou = sess.run(mean_precision)
+		
+	return iou
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 	

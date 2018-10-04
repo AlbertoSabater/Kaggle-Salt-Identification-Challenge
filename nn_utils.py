@@ -125,10 +125,8 @@ def get_image_depth_generator_on_memory_v2(images, masks, depths, batch_size, da
 	while True:
 		image_n = image_f.next()
 		mask_n = mask_f.next()
-		
-#		yield {'input_image': image_n[0], 'input_depth': image_n[1]}, {'output': mask_n}
-#		yield [image_n[0], image_n[1]], mask_n
-		yield np.concatenate([image_n[0], image_n[1]], axis=0), mask_n
+		yield [image_n[0], image_n[1]], mask_n
+
 
 
 # deprecated
@@ -166,6 +164,6 @@ def get_result(pred, base_score):
 	pred = rle_encoding(pred, base_score)
 	return pred
 
-def get_prediction_result(model, images, target_size, base_score):
-	return Parallel(n_jobs=N_JOBS)(delayed(get_result)(model.predict(img.reshape((1,)+target_size+(1,)))[0,:,:,0], base_score) 
-						for img in tqdm(images, total=len(images)))
+#def get_prediction_result(model, images, target_size, base_score):
+#	return Parallel(n_jobs=N_JOBS)(delayed(get_result)(model.predict(img.reshape((1,)+target_size+(1,)))[0,:,:,0], base_score) 
+#						for img in tqdm(images, total=len(images)))
