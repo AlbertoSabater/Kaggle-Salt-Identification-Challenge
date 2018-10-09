@@ -102,34 +102,47 @@ def get_coverage_class(masks):
 # %%
 
 
-def get_image_generator_on_memory(images, masks, batch_size, data_gen_args):
-	
+#def get_image_generator_on_memory(images, masks, batch_size, data_gen_args):
+#	
+#	seed = 123
+#
+#	image_datagen = ImageDataGenerator(**data_gen_args)
+#	mask_datagen = ImageDataGenerator(**data_gen_args)
+#	
+#	generator = zip(image_datagen.flow(images, batch_size=batch_size, shuffle=True, seed=seed), 
+#						   mask_datagen.flow(masks, batch_size=batch_size, shuffle=True, seed=seed))
+#	
+#	return generator, images.shape[0]
+
+
+#def get_image_depth_generator_on_memory(images, masks, depths, batch_size, data_gen_args):
+#	
+#	seed = 123
+#
+#	image_datagen = ImageDataGenerator(**data_gen_args)
+#	mask_datagen = ImageDataGenerator(**data_gen_args)
+##	depth_datagen = ImageDataGenerator({})
+#	
+#	generator = zip(image_datagen.flow(images, batch_size=batch_size, shuffle=True, seed=seed),
+##					   depth_datagen.flow(depths, batch_size=batch_size, shuffle=True, seed=seed), 
+#					   mask_datagen.flow(masks, batch_size=batch_size, shuffle=True, seed=seed))
+#	
+#	return generator, images.shape[0]
+
+
+def get_image_generator_on_memory_v2(images, masks, batch_size, data_gen_args):
 	seed = 123
-
 	image_datagen = ImageDataGenerator(**data_gen_args)
-	mask_datagen = ImageDataGenerator(**data_gen_args)
+	mask_datagen = ImageDataGenerator(**data_gen_args)	
 	
-	generator = zip(image_datagen.flow(images, batch_size=batch_size, shuffle=True, seed=seed), 
-						   mask_datagen.flow(masks, batch_size=batch_size, shuffle=True, seed=seed))
+	image_f = image_datagen.flow(images, batch_size=batch_size, shuffle=True, seed=seed)
+	mask_f = mask_datagen.flow(masks, batch_size=batch_size, shuffle=True, seed=seed)
 	
-	return generator, images.shape[0]
-
-
-def get_image_depth_generator_on_memory(images, masks, depths, batch_size, data_gen_args):
-	
-	seed = 123
-
-	image_datagen = ImageDataGenerator(**data_gen_args)
-	mask_datagen = ImageDataGenerator(**data_gen_args)
-#	depth_datagen = ImageDataGenerator({})
-	
-	generator = zip(image_datagen.flow(images, batch_size=batch_size, shuffle=True, seed=seed),
-#					   depth_datagen.flow(depths, batch_size=batch_size, shuffle=True, seed=seed), 
-					   mask_datagen.flow(masks, batch_size=batch_size, shuffle=True, seed=seed))
-	
-	return generator, images.shape[0]
-
-
+	while True:
+		image_n = image_f.next()
+		mask_n = mask_f.next()
+		yield image_n, mask_n
+		
 def get_image_depth_generator_on_memory_v2(images, masks, depths, batch_size, data_gen_args):
 	seed = 123
 	image_datagen = ImageDataGenerator(**data_gen_args)

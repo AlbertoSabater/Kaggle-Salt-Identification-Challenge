@@ -59,7 +59,7 @@ model_params = {
 					'height_shift_range': 0.1,
 					'zoom_range': [0.9, 1.2]
 				},
-			'validation_split': 0.0,
+			'validation_split': 0.27,
 			'batch_size': 32,
 			'epochs': 250,
 			'es_patience': 10,
@@ -102,6 +102,10 @@ else:
 	train_masks = val_masks = full_train_masks.copy()
 	train_depths = val_depths = depths.copy()
 
+
+train_images = train_images.reshape((len(train_images),)+model_params['target_size']+(1,))
+val_images = val_images.reshape((len(val_images),)+model_params['target_size']+(1,))
+	
 model_params['num_train'] = len(train_images)
 model_params['num_val'] = len(val_images)
 
@@ -124,10 +128,10 @@ if len(model_params['include_depth']) > 0:
 	
 else:
 	print(' * No including depth')
-	train_generator, num_samples_train = nn_utils.get_image_generator_on_memory(
+	train_generator = nn_utils.get_image_generator_on_memory_v2(
 			train_images, train_masks,
 			model_params['batch_size'], model_params['data_gen_args'])
-	model_params['num_samples_train'] = num_samples_train
+	model_params['num_samples_train'] = train_images.shape[0]
 	train_data = train_images
 	val_data = val_images
 
@@ -186,6 +190,8 @@ callbacks = [
 			   
 			CSVLogger(model_params['model_folder']+'log.csv', separator=',', append=True)
 		]
+
+print(' *  Model ready')
 
 hist = model.fit_generator(
 			generator = train_generator,
@@ -277,6 +283,7 @@ pickle.dump((train_preds, full_train_image_names), open(model_params['model_fold
 
 test_dir = './data/test/'
 test_data, test_image_names = nn_utils.load_folder_images(test_dir, model_params['target_size'])
+test_data = test_data.reshape((len(test_data),)+model_params['target_size']+(1,))
 if len(model_params['include_depth']) > 0:
 	test_data = [test_data, depths.loc[[ n[:-4] for n in test_image_names ]].values]
 
