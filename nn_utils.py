@@ -65,7 +65,9 @@ def get_train_generator(batch_size, target_size):
 
 
 def load_image(f, folder_path): return np.array(load_img(folder_path + f, color_mode='grayscale')) / 255
-def process_image(img, target_size): return resize(img, target_size+(1,), mode='constant', preserve_range=True, anti_aliasing=True)
+def process_image(img, target_size): 
+	if img.shape == target_size: return img
+	else: return resize(img, target_size+(1,), mode='constant', preserve_range=True, anti_aliasing=True)
 def load_and_process_image(f, folder_path, target_size):
 	img = load_image(f, folder_path)
 	return process_image(img, target_size)
@@ -84,6 +86,20 @@ def load_folder_images(folder_path, target_size):
 		data = np.array(images)
 		pickle.dump((data, image_names), open(pickle_file, 'wb'))
 		return data, image_names
+
+
+# %%
+		
+def get_coverage_class(masks):
+	mask_cov = [ (100*x.sum()/len(x.ravel())//10) for x in masks ]
+#	mask_cov = masks.map(lambda x: x.sum()/len(x.ravel()))
+	return mask_cov
+
+#a = np.array([[[1,1,0,0,1], [0,1,0,1,1]],
+#			  [[1,1,0,0,1], [0,1,1,1,1]]])
+#get_coverage_class(full_train_masks)
+
+# %%
 
 
 def get_image_generator_on_memory(images, masks, batch_size, data_gen_args):
@@ -156,12 +172,55 @@ def rle_encoding(x, base_score):
 		run_lengths[-1] += 1
 		prev = b
 	return re.sub(r'[\[\],]','', str(run_lengths))
+
+
+def mask_to_rle(mask, base_score):
+	mask = np.where(mask > base_score, 1, 0)
+
+	mask_flat = mask.flatten('F')
+	flag = 0
+	rle_list = list()
+	for i in range(mask_flat.shape[0]):
+		if flag == 0:
+			if mask_flat[i] == 1:
+				flag = 1
+				starts = i+1
+				rle_list.append(starts)
+		else:
+			if mask_flat[i] == 0:
+				flag = 0
+				ends = i
+				rle_list.append(ends-starts+1)
+	if flag == 1:
+		ends = mask_flat.shape[0]
+		rle_list.append(ends-starts+1)
+	#sanity check
+	if len(rle_list) % 2 != 0:
+		print('NG')
+	if len(rle_list) == 0:
+		rle = np.nan
+	else:
+		rle = ' '.join(map(str,rle_list))
+	return rle
+
+def rle_to_mask(rle_list, SHAPE):
+    tmp_flat = np.zeros(SHAPE[0]*SHAPE[1])
+    if len(rle_list) == 1:
+        mask = np.reshape(tmp_flat, SHAPE).T
+    else:
+        strt = rle_list[::2]
+        length = rle_list[1::2]
+        for i,v in zip(strt,length):
+            tmp_flat[(int(i)-1):(int(i)-1)+int(v)] = 255
+        mask = np.reshape(tmp_flat, SHAPE).T
+    return mask
 	
 
 def get_result(pred, base_score):
 	pred = resize(pred, (101, 101), mode='constant', preserve_range=True, anti_aliasing=True)
 #	pred = rle(pred, base_score)
 	pred = rle_encoding(pred, base_score)
+#	pred = mask_to_rle(pred, base_score)
 	return pred
 
 #def get_prediction_result(model, images, target_size, base_score):
