@@ -168,9 +168,10 @@ def residual_block(blockInput, num_filters=16, batch_activate = False):
 
 
 #https://www.kaggle.com/deepaksinghrawat/introduction-to-u-net-with-simple-resnet-blocks
-def residual_unet(input_size, size_base=16, DropoutRatio = 0.5):
+def residual_unet(input_size, size_base=16, include_depth=[], DropoutRatio = 0.5):
 
 	input_img = Input(input_size, name='input_image')
+	input_depth = Input((1,), name='input_depth')
 
 	# 101 -> 50
 	conv1 = Conv2D(size_base * 1, (3, 3), activation=None, padding="same")(input_img)
@@ -199,6 +200,14 @@ def residual_unet(input_size, size_base=16, DropoutRatio = 0.5):
 	conv4 = residual_block(conv4,size_base * 8, True)
 	pool4 = MaxPooling2D((2, 2))(conv4)
 	pool4 = Dropout(DropoutRatio)(pool4)
+
+
+	if 1 in include_depth:
+		print(' - Introducing depth 1')
+		depth1 = RepeatVector(pow(6, 2))(input_depth)
+		depth1 = Reshape((6, 6, 1), name='depth_1')(depth1)
+		pool4 = concatenate([pool4, depth1], -1)
+
 
 	# Middle
 	convm = Conv2D(size_base * 16, (3, 3), activation=None, padding="same")(pool4)
@@ -248,8 +257,14 @@ def residual_unet(input_size, size_base=16, DropoutRatio = 0.5):
 	output_layer_noActi = Conv2D(1, (1,1), padding="same", activation=None)(uconv1)
 	output_layer = Activation('sigmoid')(output_layer_noActi)
 	
-	return Model(input_img, output_layer)
-
+	
+	if len(include_depth) > 0:
+		print(' - Model with depth')
+		return Model(inputs=[input_img, input_depth], outputs=output_layer)
+	else:
+		print(' - Model without depth')
+		return Model(input_img, output_layer)
+	
 
 ###############################################################################
 ###############################################################################

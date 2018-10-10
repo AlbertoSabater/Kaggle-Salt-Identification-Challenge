@@ -25,8 +25,7 @@ from sklearn import preprocessing
 # TODO: add depth after first and/or last CNN layer
 # TODO: Parallel in tune base_score
 # TODO: Stratify by salt coverage
-# TODO: metric iou
-# TODO: add coverage as layer parameter as well as depth
+# TODO: metric iou on step training evaluation
 
 TENSORBOARD_DIR = './logs/'
 
@@ -39,6 +38,7 @@ base_score tuned on iou metric
 Added more augmentation parameters
 U-net layer sizes configurable
 U-net with residual blocks created whitout resampling
+Stratified split on coverage
 '''
 
 
@@ -48,7 +48,7 @@ model_params = {
 			'model_type': 'rrunet',
 			'target_size': (101,101),
 			'nn_size_base': 16,
-			'include_depth': [],
+			'include_depth': [1],
 			'dropout': True,
 			'batchnorm': True,
 			'data_gen_args': {
@@ -59,7 +59,7 @@ model_params = {
 					'height_shift_range': 0.1,
 					'zoom_range': [0.9, 1.2]
 				},
-			'validation_split': 0.27,
+			'validation_split': 0.0,
 			'batch_size': 32,
 			'epochs': 250,
 			'es_patience': 10,
@@ -101,6 +101,7 @@ else:
 	train_images = val_images = full_train_images.copy()
 	train_masks = val_masks = full_train_masks.copy()
 	train_depths = val_depths = depths.copy()
+	train_image_names = val_image_names = full_train_image_names.copy()
 
 
 train_images = train_images.reshape((len(train_images),)+model_params['target_size']+(1,))
@@ -135,6 +136,9 @@ else:
 	train_data = train_images
 	val_data = val_images
 
+print(' *  Data generator ready')
+
+
 
 # %%
 	
@@ -157,14 +161,13 @@ if model_params['model_type'] == 'unet':
 						   batchnorm=model_params['batchnorm'],)
 elif model_params['model_type'] == 'rrunet':
 	model = nn_models.residual_unet(input_size = model_params['target_size'] + (1,),
-							size_base = model_params['nn_size_base'])
+							size_base = model_params['nn_size_base'],
+							include_depth = model_params['include_depth'])
 else:
 	raise ValueError('Model type Error')
 		
 	
 print(model.summary())
-
-print(' *  Data generator ready')
 
 
 nn_loss = 'binary_crossentropy'
@@ -192,6 +195,9 @@ callbacks = [
 		]
 
 print(' *  Model ready')
+
+
+# %%
 
 hist = model.fit_generator(
 			generator = train_generator,
@@ -253,8 +259,11 @@ val_preds = nn_utils.process_image(val_preds, (len(val_preds),)+(101,101))
 # %%
 
 original_masks, _ = nn_utils.load_folder_images("./data/train/masks/", (101,101))
-train_original_masks, val_origial_masks = train_test_split(original_masks, test_size=model_params['validation_split'], random_state=123)
-
+if model_params['validation_split'] > 0:
+	train_original_masks, val_origial_masks = train_test_split(original_masks, test_size=model_params['validation_split'], random_state=123)
+else:
+	train_original_masks = val_origial_masks = original_masks
+		
 
 # %%
 
