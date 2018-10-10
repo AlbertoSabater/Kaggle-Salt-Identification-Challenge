@@ -23,8 +23,6 @@ from sklearn import preprocessing
 
 
 # TODO: add depth after first and/or last CNN layer
-# TODO: Parallel in tune base_score
-# TODO: Stratify by salt coverage
 # TODO: metric iou on step training evaluation
 
 TENSORBOARD_DIR = './logs/'
@@ -41,6 +39,17 @@ U-net with residual blocks created whitout resampling
 Stratified split on coverage
 '''
 
+# TEST
+# TODO: bcedice d[] 	- 0.1949 - 0.779
+# TODO: bcedice d[1] 	-
+# TODO: bcedice d[0] 	-
+# TODO: bcedice d[0,1] 	-
+# TODO: bce d[] 		-
+# TODO: bce d[1] 	 	-
+# TODO: bce d[0] 	 	-
+# TODO: bce d[0,1] 	 	-
+
+
 
 model_params = {
 			'datetime': str(datetime.datetime.now()),
@@ -52,7 +61,7 @@ model_params = {
 			'dropout': True,
 			'batchnorm': True,
 			'data_gen_args': {
-					'horizontal_flip': True, 
+					'horizontal_flip': True,
 					'vertical_flip': False,
 					'rotation_range': 20,
 					'width_shift_range': 0.1,
