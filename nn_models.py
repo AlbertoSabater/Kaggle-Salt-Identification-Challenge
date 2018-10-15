@@ -172,13 +172,21 @@ def residual_unet(input_size, size_base=16, include_depth=[], DropoutRatio = 0.5
 
 	input_img = Input(input_size, name='input_image')
 	input_depth = Input((1,), name='input_depth')
+	
 
 	# 101 -> 50
 	conv1 = Conv2D(size_base * 1, (3, 3), activation=None, padding="same")(input_img)
+	
 	conv1 = residual_block(conv1,size_base * 1)
 	conv1 = residual_block(conv1,size_base * 1, True)
 	pool1 = MaxPooling2D((2, 2))(conv1)
 	pool1 = Dropout(DropoutRatio/2)(pool1)
+	
+	if 0 in include_depth:
+		print(' - Introducing depth 0', input_size)
+		depth0 = RepeatVector(pow(50, 2))(input_depth)
+		depth0 = Reshape((50,50,1), name='depth_0')(depth0)
+		pool1 = concatenate([pool1, depth0], -1)
 
 	# 50 -> 25
 	conv2 = Conv2D(size_base * 2, (3, 3), activation=None, padding="same")(pool1)

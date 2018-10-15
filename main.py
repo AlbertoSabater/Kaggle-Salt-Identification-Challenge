@@ -41,11 +41,11 @@ Stratified split on coverage
 
 # TEST
 # TODO: bcedice d[] 	- 0.1949 - 0.779
-# TODO: bcedice d[1] 	-
+# TODO: bcedice d[1] 	- 0.2262 - 0.756
 # TODO: bcedice d[0] 	-
 # TODO: bcedice d[0,1] 	-
 # TODO: bce d[] 		-
-# TODO: bce d[1] 	 	-
+# TODO: bce d[1] 	 	- 0.1441 - 0.724
 # TODO: bce d[0] 	 	-
 # TODO: bce d[0,1] 	 	-
 
@@ -57,7 +57,7 @@ model_params = {
 			'model_type': 'rrunet',
 			'target_size': (101,101),
 			'nn_size_base': 16,
-			'include_depth': [1],
+			'include_depth': [0],
 			'dropout': True,
 			'batchnorm': True,
 			'data_gen_args': {
@@ -72,7 +72,7 @@ model_params = {
 			'batch_size': 32,
 			'epochs': 250,
 			'es_patience': 10,
-			'loss': 'bcedice', 			# bce / dice / bcedice
+			'loss': 'bce', 			# bce / dice / bcedice
 			'optimizer': 'adam',
 			'metrics': ["accuracy"],
 			'monitor': 'val_loss',
