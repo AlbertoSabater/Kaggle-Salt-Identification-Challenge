@@ -1,5 +1,17 @@
 # CHANGELOG
 
+### 2018-10-10 | LB 1781/3187 | Score 0.779
+
+Ubuntu updated to Cuda 9.0  
+Depth added to U-net concatenating it to first and/or mid layer  
+Model store name updated  
+Prediction threshold tunned with IoU metric  
+Added more augmentation parameters  
+U-net layer sizes configurable  
+NEW MODEL, U-net with residual blocks created + configurable layer sizes. Not need image resampling  
+Stratified train-test split on salt coverage  
+
+
 ### 2018-09-08 | LB 1870/2152 | Score 0.622
 
 Dice Loss added  
