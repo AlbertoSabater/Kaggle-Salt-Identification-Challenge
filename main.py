@@ -28,6 +28,8 @@ from sklearn import preprocessing
 # TODO: - add ReduceLROnPlateau
 # TODO: modelos pretrained resnet34, resnet50
 	# https://www.kaggle.com/meaninglesslives/using-resnet50-pretrained-model-in-keras
+	# https://github.com/killthekitten/kaggle-carvana-2017/blob/master/models.py
+	# https://www.kaggle.com/c/tgs-salt-identification-challenge/discussion/65387
 
 TENSORBOARD_DIR = './logs/'
 
@@ -71,6 +73,7 @@ model_params = {
 			'batch_size': 32,
 			'epochs': 250,
 			'es_patience': 10,
+			'rlr_patience': 5,
 			'loss': 'bcedice', 			# bce / dice / bcedice
 			'optimizer': 'adam',
 			'metrics': ["accuracy", nn_models.iou_tf],
@@ -202,7 +205,7 @@ callbacks = [
 			CSVLogger(model_params['model_folder']+'log.csv', separator=',', append=True),
 			
 			ReduceLROnPlateau(monitor=model_params['monitor'], factor=0.5,
-                              patience=5, min_lr=0.00001)
+                              patience=model_params['rlr_patience'], min_lr=0.00001)
 		]
 
 print(' *  Model ready')
