@@ -30,27 +30,32 @@ def dice_loss(y_true, y_pred):
 def bce_dice_loss(y_true, y_pred):
 	return binary_crossentropy(y_true, y_pred) + dice_loss(y_true, y_pred)
 
+def bce_iou_loss(y_true, y_pred):
+	return binary_crossentropy(y_true, y_pred) + (1 - tf.py_func(iou_numpy, [y_true, y_pred > 0.5], tf.float64))
+
+
 
 def tune_base_score(pred, y):
 	best_bs = 0.5
 	best_score = 0
-	bs_pipeline = [(0.05, 4, 5),
+	bs_pipeline = [(0.05, 3, 7),
 					   (0.05/3, 2, 3),
 					   (0.05/3/3, 2, 3),
 					   (0.05/3/3/3, 2, 3)]
 	
 	for params in bs_pipeline:
-#		print(params, best_bs-params[0]*params[1], best_bs+params[0]*params[2], params[0])
+		print(params, best_bs-params[0]*params[1], best_bs+params[0]*params[2], params[0])
 		for bs in np.arange(best_bs-params[0]*params[1], best_bs+params[0]*params[2], params[0]):
 #			score = accuracy_score(np.where(pred>bs, 1, 0), y)
-			score = iou_precision(y, np.where(pred>bs, 1, 0))
+#			score = iou_precision(y, np.where(pred>bs, 1, 0))
+			score = iou_numpy(y, np.where(pred>bs, 1, 0))
 #			print(bs, score)
 			if score > best_score:
 				best_score = score
 				best_bs = bs
 #		print('-'*60)
-#		print(best_bs, best_score)
-#		print('-'*60)
+		print(best_bs, best_score)
+		print('-'*60)
 		
 	return best_bs, best_score
 
@@ -314,10 +319,57 @@ def iou_precision(y_true, y_pred):
 	return iou
 
 
+#https://www.kaggle.com/cpmpml/fast-iou-metric-in-numpy-and-tensorflow
+def iou_numpy(A, B):
+	# Numpy version
+	
+	batch_size = A.shape[0]
+	metric = 0.0
+	for batch in range(batch_size):
+		t, p = A[batch], B[batch]
+		true = np.sum(t)
+		pred = np.sum(p)
+		
+		# deal with empty mask first
+		if true == 0:
+			metric += (pred == 0)
+			continue
+		
+		# non empty mask case.  Union is never empty 
+		# hence it is safe to divide by its number of pixels
+		intersection = np.sum(t * p)
+		union = true + pred - intersection
+		iou = intersection / union
+		
+		# iou metrric is a stepwise approximation of the real iou over 0.5
+		iou = np.floor(max(0, (iou - 0.45)*20)) / 10
+		
+		metric += iou
+		
+	# teake the average over all images in batch
+	metric /= batch_size
+	return metric
 
 
+def iou_tf(label, pred):
+	# Tensorflow version
+	return tf.py_func(iou_numpy, [label, pred > 0.5], tf.float64)
 
 
+def predict(model, data, tta=True):
+	preds_1 = model.predict(data)
+	print(preds_1.shape)
+	
+	if tta:
+		data_tta = np.array([ np.flip(a, 1) for a in data ])
+		preds_2 = model.predict(data_tta)
+		print(preds_2.shape)
+		preds_2 = np.array([ np.flip(a, 1) for a in preds_2 ])
+		print(preds_2.shape)
+	
+		return np.array([ (preds_1[i]+preds_2[i])/2 for i in range(data.shape[0]) ])
+	else:
+		return preds_1
 
 
 

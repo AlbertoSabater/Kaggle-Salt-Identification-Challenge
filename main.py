@@ -16,14 +16,18 @@ import pickle
 import time
 #from tqdm import tqdm
 
-from keras.callbacks import EarlyStopping, ModelCheckpoint, TensorBoard, CSVLogger
+from keras.callbacks import EarlyStopping, ModelCheckpoint, TensorBoard, CSVLogger, ReduceLROnPlateau
 from keras.models import load_model, model_from_json
 from sklearn.model_selection import train_test_split
 from sklearn import preprocessing
 
 
-# TODO: add depth after first and/or last CNN layer
-# TODO: metric iou on step training evaluation
+# TODO: - metric iou on step training evaluation
+# TODO: loss based on iou AND iou + bce
+# TODO: - add TTA on predictions
+# TODO: - add ReduceLROnPlateau
+# TODO: modelos pretrained resnet34, resnet50
+	# https://www.kaggle.com/meaninglesslives/using-resnet50-pretrained-model-in-keras
 
 TENSORBOARD_DIR = './logs/'
 
@@ -37,16 +41,19 @@ Added more augmentation parameters
 U-net layer sizes configurable
 U-net with residual blocks created whitout resampling
 Stratified split on coverage
+
+IOU metric added on fit
 '''
 
 # TEST
 # TODO: bcedice d[] 	- 0.1949 - 0.779
 # TODO: bcedice d[1] 	- 0.2262 - 0.756
-# TODO: bcedice d[0] 	-
-# TODO: bcedice d[0,1] 	-
-# TODO: bce d[] 		-
+# TODO: bcedice d[0] 	- 0.2287 - 0.762
+# TODO: bcedice d[0,1] 	- 0.2275 - 0.752
+#
+# TODO: bce d[] 		- 0.1480 - 0.695
 # TODO: bce d[1] 	 	- 0.1441 - 0.724
-# TODO: bce d[0] 	 	-
+# TODO: bce d[0] 	 	- 0.1140 - 0.764
 # TODO: bce d[0,1] 	 	-
 
 
@@ -57,7 +64,7 @@ model_params = {
 			'model_type': 'rrunet',
 			'target_size': (101,101),
 			'nn_size_base': 16,
-			'include_depth': [0],
+			'include_depth': [],
 			'dropout': True,
 			'batchnorm': True,
 			'data_gen_args': {
@@ -72,12 +79,13 @@ model_params = {
 			'batch_size': 32,
 			'epochs': 250,
 			'es_patience': 10,
-			'loss': 'bce', 			# bce / dice / bcedice
+			'loss': 'bcedice', 			# bce / dice / bcedice
 			'optimizer': 'adam',
-			'metrics': ["accuracy"],
-			'monitor': 'val_loss',
+			'metrics': ["accuracy", nn_models.iou_tf],
+			'monitor': 'val_iou_tf', 'monitor_mode': 'max',
 			'model_architecture_file': 'model_architecture',
-			'base_score': 0.5
+			'base_score': 0.5,
+			'tta': True
 		}
 
 if not os.path.exists(TENSORBOARD_DIR): os.makedirs(TENSORBOARD_DIR)
@@ -148,7 +156,6 @@ else:
 print(' *  Data generator ready')
 
 
-
 # %%
 	
 # =============================================================================
@@ -191,7 +198,7 @@ model.compile(loss=nn_loss, optimizer=model_params['optimizer'], metrics=model_p
 
 callbacks = [
 			ModelCheckpoint(model_params['model_folder'] + model_params['model_weights_file'] + '.h5', 
-				   monitor=model_params['monitor'], verbose=1, save_best_only=True, mode='auto'),
+				   monitor=model_params['monitor'], verbose=1, save_best_only=True, mode=model_params['monitor_mode']),
 				   
 			EarlyStopping(monitor=model_params['monitor'], min_delta=0.00001, 
 				 verbose=1, mode='auto', patience=model_params['es_patience']),
@@ -200,7 +207,10 @@ callbacks = [
 						  histogram_freq=0, write_graph=True, 
 						  write_grads=1, batch_size=model_params['batch_size'], write_images=True),
 			   
-			CSVLogger(model_params['model_folder']+'log.csv', separator=',', append=True)
+			CSVLogger(model_params['model_folder']+'log.csv', separator=',', append=True),
+			
+			ReduceLROnPlateau(monitor=model_params['monitor'], factor=0.5,
+                              patience=5, min_lr=0.00001)
 		]
 
 print(' *  Model ready')
@@ -233,6 +243,7 @@ with open(model_params['model_folder'] + model_params['model_architecture_file']
 	json.dump(model_architecture, f)
 	
 
+del model_params['metrics']
 # Store model params
 with open(model_params['model_folder'] + 'model_params.json', 'w') as f:
 	json.dump(model_params, f)
@@ -242,14 +253,15 @@ with open(model_params['model_folder'] + 'model_params.json', 'w') as f:
 val = min(hist.history[model_params['monitor']]) if 'loss' in model_params['monitor'] else max(hist.history[model_params['monitor']])
 new_model_folder = model_params['model_folder'][:-1] + \
 				"_{}_{:.4f}".format(model_params['monitor'], val)
-new_model_folder = new_model_folder + '_{}_{}_n{}_{}_{}_d{}/'.format(
+new_model_folder = new_model_folder + '_{}_{}_n{}_{}_{}_d{}_{}_{}/'.format(
 						model_params['model_type'],
 						'stry' if model_params['stratify'] and model_params['validation_split']>0.0 else 'nstry',
 						model_params['loss'],
 						model_params['nn_size_base'],
 						'd' if model_params['dropout'] else 'nd',
 						'bn' if model_params['batchnorm'] else 'nbn',
-						''.join([ str(v) for v in model_params['include_depth'] ]) if len(model_params['include_depth'])>0 else 'nd'
+						''.join([ str(v) for v in model_params['include_depth'] ]) if len(model_params['include_depth'])>0 else 'nd',
+						'tta' if model_params['tta'] else 'notta'
 		)
 
 os.rename(model_params['model_folder'], new_model_folder)
@@ -261,7 +273,8 @@ model.load_weights(model_params['model_folder'] + model_params['model_weights_fi
 
 # %%
 
-val_preds = model.predict(val_data)
+val_preds = nn_models.predict(model, val_data, tta=model_params['tta'])
+#val_preds = model.predict(val_data)
 val_preds = nn_utils.process_image(val_preds, (len(val_preds),)+(101,101))
 
 
@@ -278,9 +291,10 @@ else:
 
 print('Tuning base score', datetime.datetime.now().strftime('%H:%M:%S'))
 t = time.time()
-best_bs, best_score = nn_models.tune_base_score(val_preds.ravel(), val_origial_masks.ravel().astype(int))
+#best_bs, best_score = nn_models.tune_base_score(val_preds.ravel(), val_origial_masks.ravel().astype(int))
+best_bs, best_score = nn_models.tune_base_score(val_preds, val_origial_masks.astype(int))
 model_params['base_score'] = best_bs
-print('Base score tuned. {}. {}m. {} | {}'.format(datetime.datetime.now().strftime('%H:%M:%S'), 
+print('Base score tuned. {}. {:.2f}m. {:.4f} | {}'.format(datetime.datetime.now().strftime('%H:%M:%S'), 
 	  (time.time()-t)/60, best_bs, best_score))
 
 
@@ -288,7 +302,8 @@ print('Base score tuned. {}. {}m. {} | {}'.format(datetime.datetime.now().strfti
 
 print(' * Calculating and storing train predictions')
 #train_preds = nn_utils.get_prediction_result(model, val_data, model_params['target_size'], model_params['base_score'])
-train_preds = model.predict(train_data)
+#train_preds = model.predict(train_data)
+train_preds = nn_models.predict(model, train_data, tta=model_params['tta'])
 train_preds = [ nn_utils.get_result(tp, model_params['base_score']) for tp in train_preds ]
 pickle.dump((train_preds, full_train_image_names), open(model_params['model_folder']+'preds_train.pckl', 'wb'))
 
@@ -310,7 +325,8 @@ if len(model_params['include_depth']) > 0:
 
 print(' * Calculating and storing test predictions')
 
-test_preds = model.predict(test_data)
+#test_preds = model.predict(test_data)
+test_preds = nn_models.predict(model, test_data, tta=model_params['tta'])
 test_preds = [ nn_utils.get_result(tp, model_params['base_score']) for tp in test_preds ]
 
 pickle.dump((test_preds, test_image_names), open(model_params['model_folder']+'preds_test.pckl', 'wb'))
@@ -328,7 +344,8 @@ print(' * Submitting predictions')
 #comment = '\n'.join([ '{}: {}'.format(k,v) for k,v in model_params.items() ])
 #comment = str(model_params)
 
-comment = 'l_{}_vs{}'.format(model_params['loss'], model_params['validation_split'])
+val_loss = max(hist.history['val_loss'])
+comment = 'l{}_vl{}_vs{}'.format(model_params['loss'], val_loss, model_params['validation_split'])
 command = 'kaggle competitions submit -c tgs-salt-identification-challenge -f {} -m "{}"'.format(csv_path.replace('|', '\|'), comment)
 print(command)
 #os.system(command)
