@@ -32,17 +32,9 @@ from sklearn import preprocessing
 TENSORBOARD_DIR = './logs/'
 
 '''
-Ubuntu updated to Cuda 9.0
-tensorflow-gpu updated
-multi-input model created in base u-net. Depths as input concatenated in different layers
-stored model name udpated
-base_score tuned on iou metric
-Added more augmentation parameters
-U-net layer sizes configurable
-U-net with residual blocks created whitout resampling
-Stratified split on coverage
-
 IOU metric added on fit
+Predicciones con TTA
+ReduceLROnPlateau
 '''
 
 # TEST
@@ -201,7 +193,7 @@ callbacks = [
 				   monitor=model_params['monitor'], verbose=1, save_best_only=True, mode=model_params['monitor_mode']),
 				   
 			EarlyStopping(monitor=model_params['monitor'], min_delta=0.00001, 
-				 verbose=1, mode='auto', patience=model_params['es_patience']),
+				 verbose=1, mode=model_params['monitor_mode'], patience=model_params['es_patience']),
 			
 			TensorBoard(log_dir='{}{}'.format(TENSORBOARD_DIR, model_params['model_folder'].split('/')[-2]), 
 						  histogram_freq=0, write_graph=True, 
@@ -273,21 +265,19 @@ model.load_weights(model_params['model_folder'] + model_params['model_weights_fi
 
 # %%
 
-val_preds = nn_models.predict(model, val_data, tta=model_params['tta'])
-#val_preds = model.predict(val_data)
-val_preds = nn_utils.process_image(val_preds, (len(val_preds),)+(101,101))
-
-
-# %%
-
 original_masks, _ = nn_utils.load_folder_images("./data/train/masks/", (101,101))
 if model_params['validation_split'] > 0:
 	train_original_masks, val_origial_masks = train_test_split(original_masks, test_size=model_params['validation_split'], random_state=123)
 else:
 	train_original_masks = val_origial_masks = original_masks
-		
-
+	
+	
 # %%
+
+val_preds = nn_models.predict(model, val_data, tta=model_params['tta'])
+#val_preds = model.predict(val_data)
+val_preds = nn_utils.process_image(val_preds, (len(val_preds),)+(101,101))
+
 
 print('Tuning base score', datetime.datetime.now().strftime('%H:%M:%S'))
 t = time.time()
