@@ -40,15 +40,15 @@ ReduceLROnPlateau
 '''
 
 # TEST
-# TODO: bcedice d[] 	- 0.1949 - 0.779
-# TODO: bcedice d[1] 	- 0.2262 - 0.756
-# TODO: bcedice d[0] 	- 0.2287 - 0.762
-# TODO: bcedice d[0,1] 	- 0.2275 - 0.752
+# TODO: bcedice d[] 	| 0.1949 - 0.779 | 0.7432 - 0.745
+# TODO: bcedice d[1] 	| 0.2262 - 0.756
+# TODO: bcedice d[0] 	| 0.2287 - 0.762
+# TODO: bcedice d[0,1] 	| 0.2275 - 0.752
 #
-# TODO: bce d[] 		- 0.1480 - 0.695
-# TODO: bce d[1] 	 	- 0.1441 - 0.724
-# TODO: bce d[0] 	 	- 0.1140 - 0.764
-# TODO: bce d[0,1] 	 	-
+# TODO: bce d[] 		| 0.1480 - 0.695
+# TODO: bce d[1] 	 	| 0.1441 - 0.724
+# TODO: bce d[0] 	 	| 0.1140 - 0.764
+# TODO: bce d[0,1] 	 	|
 
 
 
@@ -58,13 +58,13 @@ model_params = {
 			'model_type': 'rrunet',
 			'target_size': (101,101),
 			'nn_size_base': 16,
-			'include_depth': [],
+			'include_depth': [0,1],
 			'dropout': True,
 			'batchnorm': True,
 			'data_gen_args': {
 					'horizontal_flip': True,
 					'vertical_flip': False,
-					'rotation_range': 20,
+					'rotation_range': 15,
 					'width_shift_range': 0.1,
 					'height_shift_range': 0.1,
 					'zoom_range': [0.9, 1.2]
@@ -74,7 +74,7 @@ model_params = {
 			'epochs': 250,
 			'es_patience': 10,
 			'rlr_patience': 5,
-			'loss': 'bcedice', 			# bce / dice / bcedice
+			'loss': 'bcedice', 			# bce / dice / bcedice / bceiou
 			'optimizer': 'adam',
 			'metrics': ["accuracy", nn_models.iou_tf],
 			'monitor': 'val_iou_tf', 'monitor_mode': 'max',
@@ -341,7 +341,7 @@ val_loss = max(hist.history['val_loss'])
 comment = 'l{}_vl{}_vs{}'.format(model_params['loss'], val_loss, model_params['validation_split'])
 command = 'kaggle competitions submit -c tgs-salt-identification-challenge -f {} -m "{}"'.format(csv_path.replace('|', '\|'), comment)
 print(command)
-#os.system(command)
+os.system(command)
 #print(' * Predictions submitted')
 
 

@@ -30,8 +30,8 @@ def dice_loss(y_true, y_pred):
 def bce_dice_loss(y_true, y_pred):
 	return binary_crossentropy(y_true, y_pred) + dice_loss(y_true, y_pred)
 
-def bce_iou_loss(y_true, y_pred):
-	return binary_crossentropy(y_true, y_pred) + (1 - tf.py_func(iou_numpy, [y_true, y_pred > 0.5], tf.float64))
+#def bce_iou_loss(y_true, y_pred):
+#	return binary_crossentropy(y_true, y_pred) + (1 - tf.py_func(iou_numpy, [y_true, y_pred > 0.5], tf.float64))
 
 
 
