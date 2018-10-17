@@ -240,7 +240,8 @@ for i in range(model_params['n_models']):
 				CSVLogger(model_params['model_folder']+'log.csv', separator=',', append=True),
 				
 				ReduceLROnPlateau(monitor=model_params['monitor'], mode=model_params['monitor_mode'], 
-								  factor=0.5, patience=model_params['rlr_patience'], min_lr=0.00001)
+								  factor=0.5, patience=model_params['rlr_patience'], 
+								  min_lr=0.00001, verbose=1)
 			]
 	
 	print(' *  Model {}/{} ready'.format(i+1, model_params['n_models']))
