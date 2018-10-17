@@ -12,6 +12,7 @@ import tensorflow as tf
 import numpy as np
 from keras.losses import binary_crossentropy
 from sklearn.metrics import accuracy_score
+from tqdm import tqdm
 
 
 def bce(y_true, y_pred):
@@ -358,23 +359,34 @@ def iou_tf(label, pred):
 
 def predict(model, data, tta=True):
 	preds_1 = model.predict(data)
-	print(preds_1.shape)
+#	print(preds_1.shape)
 	
 	if tta:
-		data_tta = np.array([ np.flip(a, 1) for a in data ])
+		if type(data) is list:
+			data_tta = [np.array([ np.flip(a, 1) for a in data[0]]), data[1]]
+		else:
+			data_tta = np.array([ np.flip(a, 1) for a in data ])
 		preds_2 = model.predict(data_tta)
-		print(preds_2.shape)
 		preds_2 = np.array([ np.flip(a, 1) for a in preds_2 ])
-		print(preds_2.shape)
+#		print(preds_2.shape)
 	
-		return np.array([ (preds_1[i]+preds_2[i])/2 for i in range(data.shape[0]) ])
+#		if type(data) is list:
+#			return np.array([ (preds_1[i]+preds_2[i])/2 for i in range(data[0].shape[0]) ])
+#		else:
+#			return np.array([ (preds_1[i]+preds_2[i])/2 for i in range(data.shape[0]) ])
+		return np.array([ (preds_1[i]+preds_2[i])/2 for i in range(preds_2.shape[0]) ])
 	else:
 		return preds_1
+	
+def predict_models(models, data, tta=True):
+	preds = [ predict(m, data, tta) for m in tqdm(models, total=len(models))]
+	return np.mean(preds, axis=0)
 
 
-
-
-
+def set_model_trainable(model):
+	for i in range(len(model.layers)):
+		model.layers[i].trainable = True
+	return  model
 
 
 
