@@ -1,5 +1,14 @@
 # CHANGELOG
 
+### 2018-10-18 | LB 1604/3243 | Score 0.793
+
+Test Time Augmentation (TTA) added to model predictions  
+Train an array of models. Final prediction obtained with the average of single predictions  
+IoU metric added to epoch metrics  
+Added ReduceLROnPlateau to training callbacks  
+Added pretrained u-net models based on ResNet-18 and ResNet-34. Unable to train them due to the lack of GPU memory  
+
+
 ### 2018-10-10 | LB 1781/3187 | Score 0.779
 
 Ubuntu updated to Cuda 9.0  
