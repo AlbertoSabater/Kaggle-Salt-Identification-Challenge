@@ -17,44 +17,18 @@ import time
 #from tqdm import tqdm
 
 from keras.callbacks import EarlyStopping, ModelCheckpoint, TensorBoard, CSVLogger, ReduceLROnPlateau
-from keras.models import load_model, model_from_json
-from sklearn.model_selection import train_test_split
+#from keras.models import load_model, model_from_json
+#from sklearn.model_selection import train_test_split
 from sklearn import preprocessing
 
 import segmentation_models
 from segmentation_models.utils import set_trainable
-#from resnet_pretrained import UResNet34
 
 
-# TODO: modelos pretrained resnet34, resnet50
-	# Freeze enconder at the beginning
-	# https://www.kaggle.com/meaninglesslives/using-resnet50-pretrained-model-in-keras
-	# https://github.com/killthekitten/kaggle-carvana-2017/blob/master/models.py
-	# https://www.kaggle.com/c/tgs-salt-identification-challenge/discussion/65387
-# TODO: modificar layers del decoder para que el output sea 101
-# TODO: train durante ~40 epochs y después con early stopping on val_iou_tf
-# TODO: add lovasz loss in a second training
+# TODO: support a depth
+
 
 TENSORBOARD_DIR = './logs/'
-
-'''
-Added k-fold training. Final prediction based on the aerage of single model predictions
-'''
-
-# TEST
-# TODO: bcedice d[] 	| 0.1949 - 0.779 | 0.7432 - 0.745
-# TODO: bcedice d[1] 	| 0.2262 - 0.756
-# TODO: bcedice d[0] 	| 0.2287 - 0.762
-# TODO: bcedice d[0,1] 	| 0.2275 - 0.752
-#
-# TODO: bce d[] 		| 0.1480 - 0.695 | 0.7436 - 0.738
-# TODO: bce d[1] 	 	| 0.1441 - 0.724
-# TODO: bce d[0] 	 	| 0.1140 - 0.764
-# TODO: bce d[0,1] 	 	|
-
-# TODO: rrunet, 	n_models=5, batch_size=32, nn_size_base=32
-# TODO: resnet34, 	n_models=1, batch_size=32 target_size (256,256)
-
 
 model_params = {
 			'datetime': str(datetime.datetime.now()),
@@ -111,69 +85,7 @@ coverage_class = nn_utils.get_coverage_class(full_train_masks)
 
 # %%
 
-if model_params['model_type'] in ['resnet34', 'resnet18']:
-	full_train_images = np.array([ np.dstack([img]*3) for img in full_train_images ])
-
-
-# %%
-
-# Create train and validation dataset
-if model_params['validation_split'] > 0:
-	train_images, val_images, train_masks, val_masks= train_test_split(
-			full_train_images, full_train_masks, test_size=model_params['validation_split'], random_state=123)
-	if model_params['stratify'] and model_params['validation_split']>0.0:
-		train_image_names, val_image_names = train_test_split(full_train_image_names, 
-					test_size=model_params['validation_split'], stratify=coverage_class, random_state=123)
-	else: 
-		train_image_names, val_image_names = train_test_split(full_train_image_names, test_size=model_params['validation_split'], random_state=123)
-else:
-	train_images = val_images = full_train_images.copy()
-	train_masks = val_masks = full_train_masks.copy()
-	train_depths = val_depths = depths.copy()
-	train_image_names = val_image_names = full_train_image_names.copy()
-
-
-if model_params['model_type'] not in ['resnet34', 'resnet18']:
-	train_images = train_images.reshape((len(train_images),)+model_params['target_size']+(1,))
-	val_images = val_images.reshape((len(val_images),)+model_params['target_size']+(1,))
-	
-model_params['num_train'] = len(train_images)
-model_params['num_val'] = len(val_images)
-
-# Augmented train dataset
-#train_generator, num_samples_train = get_train_generator(batch_size, target_size)
-if len(model_params['include_depth']) > 0:
-	
-	print(' * Including depth')
-	train_depths = depths.loc[[ n[:-4] for n in train_image_names ]].values
-	val_depths = depths.loc[[ n[:-4] for n in val_image_names ]].values
-#	depths_train = np.concatenate( [ np.resize(d, (1, 128,128,1)) for d in depths_train ])
-#	train_generator, num_samples_train = nn_utils.get_image_depth_generator_on_memory(
-	train_generator = nn_utils.get_image_depth_generator_on_memory_v2(
-			train_images, train_masks, train_depths,
-			model_params['batch_size'], model_params['data_gen_args'])
-	model_params['num_samples_train'] = train_images.shape[0]
-	
-	train_data = [train_images, train_depths]
-	val_data = [val_images, val_depths]
-	
-else:
-	print(' * No including depth')
-	train_generator = nn_utils.get_image_generator_on_memory_v2(
-			train_images, train_masks,
-			model_params['batch_size'], model_params['data_gen_args'])
-	model_params['num_samples_train'] = train_images.shape[0]
-	train_data = train_images
-	val_data = val_images
-
-print(' *  Data generator ready')
-
-
-# %%
-	
-# =============================================================================
-# Create and train Model
-# =============================================================================
+models = []
 
 model_params['model_folder'] = nn_utils.create_new_model_folder()
 if not os.path.exists(model_params['model_folder']): os.makedirs(model_params['model_folder'])
@@ -182,8 +94,37 @@ model_params['model_weights_file']= 'model_weights'
 print(model_params['model_folder'])
 
 
-models = []
-for i in range(model_params['n_models']):
+from sklearn.model_selection import StratifiedKFold
+
+skf = StratifiedKFold(n_splits=model_params['n_models'], shuffle=True)
+
+for train_index, test_index in skf.split(full_train_images, coverage_class):
+	
+	print(' *  FOLD: {}/{}'.format(len(models)+1, model_params['n_models']))	
+
+# =============================================================================
+# Create fold training-test dataset
+# =============================================================================
+	
+	train_images, test_images = full_train_images[train_index], full_train_images[test_index]
+	train_masks, test_masks = full_train_masks[train_index], full_train_masks[test_index]
+	
+	train_generator = nn_utils.get_image_generator_on_memory_v2(
+			train_images, train_masks,
+			model_params['batch_size'], model_params['data_gen_args'])
+	
+	val_data = full_train_images[test_index]
+	val_masks = full_train_masks[test_index]
+	
+	model_params['num_samples_train'] = len(train_index)
+	
+	print(train_images.shape, test_images.shape)
+	print(val_data.shape, val_masks.shape)
+
+
+# =============================================================================
+# Create and train Model
+# =============================================================================
 	
 	print(' *  Building', model_params['model_type'])
 
@@ -206,12 +147,11 @@ for i in range(model_params['n_models']):
 		model = segmentation_models.Unet(backbone_name='resnet18', 
 								   encoder_weights='imagenet', freeze_encoder=model_params['freeze_encoder'])
 	else:
-		raise ValueError('Model type Error')
-			
-		
-#	print(model.summary())
-	print('Layers unfrozen: {}/{}'.format(sum([l.trainable for l in model.layers]), len(model.layers)))
+		raise ValueError('Model type Error')	
 	
+	
+	print('Trainable layers: {}/{}'.format(sum([l.trainable for l in model.layers]), len(model.layers)))
+
 	
 	nn_loss = 'binary_crossentropy'
 	if model_params['loss'] == 'bce':
@@ -242,7 +182,7 @@ for i in range(model_params['n_models']):
 								  min_lr=0.00001, verbose=1)
 			]
 	
-	print(' *  Model {}/{} ready'.format(i+1, model_params['n_models']))
+	print(' *  Model {}/{} ready'.format(len(models)+1, model_params['n_models']))
 
 
 
@@ -256,15 +196,14 @@ for i in range(model_params['n_models']):
 				callbacks = callbacks,
 				use_multiprocessing = False if platform.system() == 'Windows' else True,
 				verbose = 1)
+	
 
 
 	if model_params['retrain_resnet'] and model_params['freeze_encoder'] and \
 			model_params['model_type'] in ['resnet34', 'resnet18']:
 		print(' * Unfreezing model')
-#		model = nn_models.set_model_trainable(model)
-#		model.compile(loss=nn_loss, optimizer=model_params['optimizer'], metrics=model_params['metrics'])
 		set_trainable(model)
-		print('Layers unfrozen: {}/{}'.format(sum([l.trainable for l in model.layers]), len(model.layers)))
+		print('Trainable layers: {}/{}'.format(sum([l.trainable for l in model.layers]), len(model.layers)))
 		hist = model.fit_generator(
 					generator = train_generator,
 					steps_per_epoch = 1.4*(model_params['num_samples_train'] // model_params['batch_size']), #################### 3072 num_samples_train
@@ -275,29 +214,30 @@ for i in range(model_params['n_models']):
 					callbacks = callbacks,
 					use_multiprocessing = False if platform.system() == 'Windows' else True,
 					verbose = 1)
+		
 	
-	print(' *  Model {}/{} trained'.format(i+1, model_params['n_models']))
+	print(' *  Model {}/{} trained'.format(len(models)+1, model_params['n_models']))
+
+	# Storing best model
 	model.load_weights(model_checkpoint_file)
-	models.append(model)
+	models.append(model)	
 	
 	val_loss = min(hist.history['val_loss'])
 	val_iou = min(hist.history['val_iou_tf'])
 	os.rename(model_checkpoint_file, 
 		   model_checkpoint_file.replace('.h5', '_{:.4f}_{:.4f}.h5'.format(val_loss, val_iou)))
-
-
+	
+	
 # %%
 
-
-
-# %%
-
+# =============================================================================
+# Store model_architecture and params
+# =============================================================================
 
 # Store model architecture
 model_architecture = model.to_json()
 with open(model_params['model_folder'] + model_params['model_architecture_file'] + '.json', 'w') as f:
 	json.dump(model_architecture, f)
-	
 
 del model_params['metrics']
 # Store model params
@@ -328,38 +268,22 @@ model_params['model_folder'] = new_model_folder
 
 # %%
 
-original_masks, _ = nn_utils.load_folder_images("./data/train/masks/", (101,101))
-if model_params['validation_split'] > 0:
-	train_original_masks, val_origial_masks = train_test_split(original_masks, test_size=model_params['validation_split'], random_state=123)
-else:
-	train_original_masks = val_origial_masks = original_masks
-	
-	
-# %%
+# =============================================================================
+# Tune base_score and store full predictions
+# =============================================================================
 
-val_preds = nn_models.predict_models(models, val_data, tta=model_params['tta'])
-#val_preds = model.predict(val_data)
-val_preds = nn_utils.process_image(val_preds, (len(val_preds),)+(101,101))
-
-# %%
+full_preds = nn_models.predict_models(models, full_train_images, tta=model_params['tta'])
+full_preds = nn_utils.process_image(full_preds, (len(full_preds),)+(101,101))
 
 print('Tuning base score', datetime.datetime.now().strftime('%H:%M:%S'))
 t = time.time()
-#best_bs, best_score = nn_models.tune_base_score(val_preds.ravel(), val_origial_masks.ravel().astype(int))
-best_bs, best_score = nn_models.tune_base_score(val_preds, val_origial_masks.astype(int))
+best_bs, best_score = nn_models.tune_base_score(full_preds, full_train_masks.astype(int))
 model_params['base_score'] = best_bs
-print('Base score tuned. {}. {:.2f}m. {:.4f} | {}'.format(datetime.datetime.now().strftime('%H:%M:%S'), 
+print('Base score tuned. {}. {:.2f}m. threshold: {:.4f} | score: {:.4f}'.format(datetime.datetime.now().strftime('%H:%M:%S'), 
 	  (time.time()-t)/60, best_bs, best_score))
 
-
-# %%
-
-print(' * Calculating and storing train predictions')
-#train_preds = nn_utils.get_prediction_result(model, val_data, model_params['target_size'], model_params['base_score'])
-#train_preds = model.predict(train_data)
-train_preds = nn_models.predict_models(models, train_data, tta=model_params['tta'])
-train_preds = [ nn_utils.get_result(tp, model_params['base_score']) for tp in train_preds ]
-pickle.dump((train_preds, full_train_image_names), open(model_params['model_folder']+'preds_train.pckl', 'wb'))
+# Store full predictions
+pickle.dump((full_preds, full_train_image_names), open(model_params['model_folder']+'preds_train.pckl', 'wb'))
 
 
 # %%
@@ -390,11 +314,7 @@ csv_path = model_params['model_folder']+model_params['model_folder'].split('/')[
 csv_df.to_csv(csv_path, compression='gzip', index=False)
 
 
-print(' ** Submit prediction?')
-#input()
 print(' * Submitting predictions')
-#comment = '\n'.join([ '{}: {}'.format(k,v) for k,v in model_params.items() ])
-#comment = str(model_params)
 
 val_loss = max(hist.history['val_loss'])
 comment = 'l{}_vl{:.4f}_vs{}'.format(model_params['loss'], val_loss, model_params['validation_split'])
@@ -407,130 +327,4 @@ print(' * Predictions submitted')
 
 
 
-# %%
 
-#model.load_weights('./models/1004_0915_model_24_val_loss_0.1887_bce_d_bn_d1/model_weights.h5')
-
-
-# %%
-
-# Plot train results
-if False:
-# %%
-#	inds = np.random.permutation(range(len(val_images)))
-	while True:
-		ind = np.random.choice(list(range(len(val_images))))
-		
-		img = val_images[ind].reshape((1,)+model_params['target_size']+(1,))
-		mask = val_masks[ind].reshape((1,)+model_params['target_size']+(1,))
-
-		if len(model_params['include_depth']) > 0:
-			depth = val_depths[ind]
-			pred = model.predict([img, depth])[0,:,:,0]
-		else:
-			pred = model.predict(img)[0,:,:,0]
-
-		
-		fig = plt.figure()
-		ax = plt.subplot(221)
-#		plt.imshow(i[0][0,:,:,0])
-		plt.imshow(img[0,:,:,0])
-		ax.set_title("Orig")
-		ax = plt.subplot(222)
-#		plt.imshow(i[1][0,:,:,0])
-		plt.imshow(mask[0,:,:,0])
-		ax.set_title("Real mask")
-		ax = plt.subplot(223)
-		plt.imshow(pred)
-		ax.set_title("Pred")
-		ax = plt.subplot(224)
-		plt.imshow(np.where(pred > model_params['base_score'], 1, 0))
-		ax.set_title("Pred mask")
-		
-		pred_res = nn_utils.resize(pred, (101, 101), mode='constant', preserve_range=True, anti_aliasing=True)
-		rle = nn_utils.rle_encoding(pred_res, model_params['base_score'])
-		pred_fin = nn_utils.rle_to_mask(rle.split(), (101,101))
-		pred_send = nn_utils.get_result(pred, model_params['base_score'])
-		pred_send = nn_utils.rle_to_mask(pred_send.split(), (101,101))
-		plt.figure()
-		plt.subplot(131)
-		plt.imshow(pred_res)
-		plt.subplot(132)
-		plt.imshow(pred_fin)
-		plt.subplot(133)
-		plt.imshow(pred_send)
-		
-		break
-	
-	# %%
-	
-# Plot test_results
-if False:
-	
-	# %%
-#	test_dir = 'data/test/'
-#	test_image_names = os.listdir(test_dir)
-#	img = nn_utils.load_and_process_image(np.random.choice(test_image_names, 1)[0], test_dir, model_params['target_size'])
-	
-#	pred = model.predict(img.reshape((1,)+model_params['target_size']+(1,)))[0,:,:,0]
-	ind = np.random.choice(list(range(len(val_images))))
-	img = test_data[0][ind].reshape((1,)+model_params['target_size']+(1,))
-	
-	if len(model_params['include_depth']) > 0:
-		depth = test_data[1][ind]
-		pred = model.predict([img, depth])[0,:,:,0]
-	else:
-		pred = model.predict(img.reshape((1,)+model_params['target_size']+(1,)))[0,:,:,0]
-	
-	fig = plt.figure()
-	plt.subplot(131)
-	plt.imshow(img[0,:,:,0])
-	plt.subplot(132)
-	plt.imshow(pred)
-	plt.subplot(133)
-	plt.imshow(np.where(pred > model_params['base_score'], 1, 0))
-	print(test_image_names[ind])
-	
-	
-	# %%
-	
-# Plot test_results
-if False:
-	
-	# %%
-#	test_dir = 'data/test/'
-#	test_image_names = os.listdir(test_dir)
-#	img = nn_utils.load_and_process_image(np.random.choice(test_image_names, 1)[0], test_dir, model_params['target_size'])
-	
-#	pred = model.predict(img.reshape((1,)+model_params['target_size']+(1,)))[0,:,:,0]
-	ind = np.random.choice(list(range(len(csv_df))))
-	img_name = csv_df.iloc[ind].id
-	img_rle = csv_df.iloc[ind].rle_mask
-	img = nn_utils.rle_to_mask(img_rle.split(), (101,101))
-	img_orig = test_data[0][test_image_names.index(img_name+'.png')]
-	
-#	img = test_data[0][ind].reshape((1,)+model_params['target_size']+(1,))
-#	
-#	if len(model_params['include_depth']) > 0:
-#		depth = test_data[1][ind]
-#		pred = model.predict([img, depth])[0,:,:,0]
-#	else:
-#		pred = model.predict(img.reshape((1,)+model_params['target_size']+(1,)))[0,:,:,0]
-	
-	fig = plt.figure()
-	plt.subplot(131)
-	plt.imshow(img_orig[:,:,0])
-	plt.subplot(132)
-	plt.imshow(img)
-#	plt.subplot(133)
-#	plt.imshow(np.where(pred > model_params['base_score'], 1, 0))
-	print(img_name)
-	
-
-# %%
-	
-for r in train_generator:
-	pass
-	break
-	
-	
