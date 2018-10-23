@@ -1,5 +1,10 @@
 # CHANGELOG
 
+### 2018-10-19 | LB 1604/3243 | Score 0.793
+
+Added K-fold training. Training a set of models with diferent train-test stratified splits. Final prediction based on the average of single model predictions  
+
+
 ### 2018-10-18 | LB 1604/3243 | Score 0.793
 
 Test Time Augmentation (TTA) added to model predictions  
