@@ -26,34 +26,7 @@ from segmentation_models.utils import set_trainable
 #from resnet_pretrained import UResNet34
 
 
-# TODO: modelos pretrained resnet34, resnet50
-	# Freeze enconder at the beginning
-	# https://www.kaggle.com/meaninglesslives/using-resnet50-pretrained-model-in-keras
-	# https://github.com/killthekitten/kaggle-carvana-2017/blob/master/models.py
-	# https://www.kaggle.com/c/tgs-salt-identification-challenge/discussion/65387
-# TODO: modificar layers del decoder para que el output sea 101
-# TODO: train durante ~40 epochs y después con early stopping on val_iou_tf
-# TODO: add lovasz loss in a second training
-
 TENSORBOARD_DIR = './logs/'
-
-'''
-Added k-fold training. Final prediction based on the aerage of single model predictions
-'''
-
-# TEST
-# TODO: bcedice d[] 	| 0.1949 - 0.779 | 0.7432 - 0.745
-# TODO: bcedice d[1] 	| 0.2262 - 0.756
-# TODO: bcedice d[0] 	| 0.2287 - 0.762
-# TODO: bcedice d[0,1] 	| 0.2275 - 0.752
-#
-# TODO: bce d[] 		| 0.1480 - 0.695 | 0.7436 - 0.738
-# TODO: bce d[1] 	 	| 0.1441 - 0.724
-# TODO: bce d[0] 	 	| 0.1140 - 0.764
-# TODO: bce d[0,1] 	 	|
-
-# TODO: rrunet, 	n_models=5, batch_size=32, nn_size_base=32
-# TODO: resnet34, 	n_models=1, batch_size=32 target_size (256,256)
 
 
 model_params = {
@@ -71,7 +44,7 @@ model_params = {
 			'batchnorm': True,
 			'data_gen_args': {
 					'horizontal_flip': True,
-					'vertical_flip': False,
+					'vertical_flip': True,
 					'rotation_range': 15,
 					'width_shift_range': 0.1,
 					'height_shift_range': 0.1,
